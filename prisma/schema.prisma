@@ -1,0 +1,206 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== USUARIOS Y AUTENTICACIÓN ====================
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  password      String
+  role          String   @default("user") // admin, supervisor, warehouse
+  sedeId        String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  sede              Sede?       @relation(fields: [sedeId], references: [id])
+  movimientos       Movimiento[] @relation("MovimientoUsuario")
+  movimientosAnulados Movimiento[] @relation("MovimientoAnuladoPor")
+}
+
+// ==================== SEDES / ALMACENES ====================
+
+model Sede {
+  id          String   @id @default(cuid())
+  nombre      String   @unique
+  direccion   String?
+  telefono    String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  users              User[]
+  stocks             Stock[]
+  stockEstados       StockEstado[]
+  movimientosOrigen  Movimiento[] @relation("MovimientoOrigen")
+  movimientosDestino Movimiento[] @relation("MovimientoDestino")
+  tecnicos           Tecnico[]
+}
+
+// ==================== CATEGORÍAS ====================
+
+model Categoria {
+  id          String   @id @default(cuid())
+  nombre      String   @unique
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  herramientas Herramienta[]
+}
+
+// ==================== HERRAMIENTAS / MATERIALES ====================
+
+model Herramienta {
+  id              String   @id @default(cuid())
+  codigo          String   @unique
+  nombre          String
+  descripcion     String?
+  unidad          String   @default("UND")
+  categoriaId     String?
+  marca           String?
+  modelo          String?
+  controlaStock   Boolean  @default(true)
+  stockMaximo     Float?
+  stockMinimo     Float?
+  costoPromedio   Float    @default(0)
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  categoria       Categoria?   @relation(fields: [categoriaId], references: [id])
+  stocks          Stock[]
+  stockEstados    StockEstado[]
+  movimientoItems MovimientoItem[]
+  asignaciones    AsignacionTecnico[]
+}
+
+// ==================== STOCK POR SEDE (Total) ====================
+
+model Stock {
+  id            String   @id @default(cuid())
+  sedeId        String
+  herramientaId String
+  cantidad      Float    @default(0)
+  costoPromedio Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  sede          Sede        @relation(fields: [sedeId], references: [id])
+  herramienta   Herramienta @relation(fields: [herramientaId], references: [id])
+  
+  @@unique([sedeId, herramientaId])
+}
+
+// ==================== STOCK POR ESTADO ====================
+
+model StockEstado {
+  id            String   @id @default(cuid())
+  sedeId        String
+  herramientaId String
+  estado        String   // BUENO, USADO, REPARADO, DANADO, EN_MANTENIMIENTO
+  cantidad      Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  sede          Sede        @relation(fields: [sedeId], references: [id])
+  herramienta   Herramienta @relation(fields: [herramientaId], references: [id])
+  
+  @@unique([sedeId, herramientaId, estado])
+}
+
+// ==================== TÉCNICOS ====================
+
+model Tecnico {
+  id              String   @id @default(cuid())
+  dni             String   @unique
+  nombre          String
+  apellido        String?
+  telefono        String?
+  sedeId          String
+  numeroCuadrilla String?
+  fechaIngreso    DateTime @default(now())
+  activo          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  sede          Sede              @relation(fields: [sedeId], references: [id])
+  asignaciones  AsignacionTecnico[]
+  movimientos   Movimiento[]      @relation("MovimientoTecnico")
+}
+
+// ==================== MOVIMIENTOS ====================
+
+model Movimiento {
+  id              String    @id @default(cuid())
+  numero          String    @unique
+  fecha           DateTime  @default(now())
+  tipo            String    // COMPRA, TRANSFERENCIA, SALIDA, DEVOLUCION_TECNICO, BAJA
+  sedeOrigenId    String?
+  sedeDestinoId   String?
+  tecnicoId       String?
+  proveedor       String?
+  comprobante     String?
+  observaciones   String?
+  usuarioId       String
+  anulado         Boolean   @default(false)
+  motivoAnulacion String?
+  fechaAnulacion  DateTime?
+  anuladoPorId    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  sedeOrigen   Sede?     @relation("MovimientoOrigen", fields: [sedeOrigenId], references: [id])
+  sedeDestino  Sede?     @relation("MovimientoDestino", fields: [sedeDestinoId], references: [id])
+  tecnico      Tecnico?  @relation("MovimientoTecnico", fields: [tecnicoId], references: [id])
+  usuario      User      @relation("MovimientoUsuario", fields: [usuarioId], references: [id])
+  anuladoPor   User?     @relation("MovimientoAnuladoPor", fields: [anuladoPorId], references: [id])
+  items        MovimientoItem[]
+}
+
+model MovimientoItem {
+  id            String   @id @default(cuid())
+  movimientoId  String
+  herramientaId String
+  cantidad      Float
+  costoUnitario Float
+  costoTotal    Float
+  serial        String?
+  estado        String?  // BUENO, USADO, REPARADO, DANADO (para devoluciones)
+  createdAt     DateTime @default(now())
+  
+  movimiento    Movimiento  @relation(fields: [movimientoId], references: [id], onDelete: Cascade)
+  herramienta   Herramienta @relation(fields: [herramientaId], references: [id])
+}
+
+// ==================== ASIGNACIONES A TÉCNICOS ====================
+
+model AsignacionTecnico {
+  id                String    @id @default(cuid())
+  tecnicoId         String
+  herramientaId     String
+  sedeId            String
+  cantidad          Float     @default(1)
+  fechaAsignacion   DateTime  @default(now())
+  fechaDevolucion   DateTime?
+  estado            String    @default("asignado") // asignado, devuelto
+  estadoHerramienta String?   // BUENO, USADO, REPARADO, DANADO
+  serial            String?
+  observaciones     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  tecnico       Tecnico     @relation(fields: [tecnicoId], references: [id])
+  herramienta   Herramienta @relation(fields: [herramientaId], references: [id])
+}
