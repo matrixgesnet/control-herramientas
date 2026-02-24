@@ -22,7 +22,7 @@ import {
   Search
 } from 'lucide-react'
 
-export type PageType = 'dashboard' | 'herramientas' | 'tecnicos' | 'sedes' | 'movimientos' | 'kardex' | 'reportes' | 'usuarios' | 'categorias' | 'consulta'
+export type PageType = 'dashboard' | 'herramientas' | 'tecnicos' | 'sedes' | 'movimientos' | 'kardex' | 'reportes' | 'usuarios' | 'categorias' | 'consulta'| 'reporte-sede'
 
 interface SidebarProps {
   currentPage: PageType
@@ -40,6 +40,7 @@ const menuItems: { id: PageType; label: string; icon: React.ReactNode; roles?: s
   { id: 'reportes', label: 'Reportes', icon: <FileText className="w-5 h-5" /> },
   { id: 'categorias', label: 'Categorías', icon: <Package className="w-5 h-5" /> },
   { id: 'usuarios', label: 'Usuarios', icon: <Settings className="w-5 h-5" />, roles: ['admin'] },
+  { id: 'reporte-sede', label: 'Reporte por Sede', icon: <Building2 className="w-5 h-5" /> },
 ]
 
 function getRoleBadge(role: string) {

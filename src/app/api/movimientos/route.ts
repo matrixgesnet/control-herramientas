@@ -1,5 +1,5 @@
 import { db } from '@/lib/db'
-import { getCurrentUser, generateMovimientoNumero, calculateCostoPromedio } from '@/lib/utils-server'
+import { getCurrentUser, generateMovimientoNumero, generateMovimientoNumeroTransferencia, calculateCostoPromedio } from '@/lib/utils-server'
 import { NextResponse } from 'next/server'
 import { Prisma } from '@prisma/client'
 
@@ -84,9 +84,11 @@ export async function POST(request: Request) {
     }
 
     // Validar fecha
-    let fechaMovimiento = new Date()
+    // Validar fecha - CORREGIDO: tipo explícito y ajuste de zona horaria
+    let fechaMovimiento: Date = new Date()
     if (fecha) {
-      fechaMovimiento = new Date(fecha)
+      // Crear fecha ajustando zona horaria (agregar 12 horas para evitar problema de día anterior)
+      fechaMovimiento = new Date(fecha + 'T12:00:00')
       
       // Validar que no sea fecha futura
       const hoy = new Date()
@@ -136,30 +138,156 @@ export async function POST(request: Request) {
         break
     }
 
-    // Generar número de movimiento
-    const numero = await generateMovimientoNumero(tipo)
+    // Obtener costo promedio de las herramientas para movimientos que no son compra
+    const itemsConCosto = await Promise.all(items.map(async (item: { herramientaId: string; cantidad: number; costoUnitario: number; serial?: string; estado?: string }) => {
+      let costoUnitario = parseFloat(item.costoUnitario) || 0
+      
+      // Para movimientos que no son compra, obtener el costo promedio de la herramienta
+      if (tipo !== 'COMPRA' && costoUnitario === 0) {
+        const herramienta = await db.herramienta.findUnique({
+          where: { id: item.herramientaId },
+          select: { costoPromedio: true }
+        })
+        costoUnitario = herramienta?.costoPromedio || 0
+      }
+      
+      return {
+        ...item,
+        costoUnitario,
+        cantidad: parseFloat(item.cantidad)
+      }
+    }))
 
     // Usar transacción para garantizar integridad
     const result = await db.$transaction(async (tx) => {
-      // Crear el movimiento
+      
+      // === TRANSFERENCIA: Crear 2 movimientos (SALIDA + INGRESO) ===
+      if (tipo === 'TRANSFERENCIA') {
+        // Generar números para ambos movimientos
+        const numeros = await generateMovimientoNumeroTransferencia(tx)
+        
+        const sedeOrigen = await tx.sede.findUnique({ where: { id: sedeOrigenId } })
+        const sedeDestino = await tx.sede.findUnique({ where: { id: sedeDestinoId } })
+        
+        // 1. Crear movimiento de SALIDA
+        const movimientoSalida = await tx.movimiento.create({
+          data: {
+            numero: numeros.salida,
+            fecha: fechaMovimiento,
+            tipo: 'TRANSFERENCIA_SALIDA',
+            sedeOrigenId,
+            sedeDestinoId,
+            comprobante,
+            observaciones: `Transferencia hacia ${sedeDestino?.nombre}. ${observaciones || ''}`,
+            usuarioId: user.id,
+            items: {
+              create: itemsConCosto.map((item) => ({
+                herramientaId: item.herramientaId,
+                cantidad: item.cantidad,
+                costoUnitario: item.costoUnitario,
+                costoTotal: item.cantidad * item.costoUnitario,
+                serial: item.serial,
+                estado: item.estado
+              }))
+            }
+          },
+          include: {
+            items: { include: { herramienta: true } }
+          }
+        })
+
+        // 2. Crear movimiento de INGRESO
+        const movimientoIngreso = await tx.movimiento.create({
+          data: {
+            numero: numeros.ingreso,
+            fecha: fechaMovimiento,
+            tipo: 'TRANSFERENCIA_INGRESO',
+            sedeOrigenId,
+            sedeDestinoId,
+            comprobante,
+            observaciones: `Transferencia desde ${sedeOrigen?.nombre}. ${observaciones || ''}`,
+            usuarioId: user.id,
+            items: {
+              create: itemsConCosto.map((item) => ({
+                herramientaId: item.herramientaId,
+                cantidad: item.cantidad,
+                costoUnitario: item.costoUnitario,
+                costoTotal: item.cantidad * item.costoUnitario,
+                serial: item.serial,
+                estado: item.estado
+              }))
+            }
+          },
+          include: {
+            items: { include: { herramienta: true } }
+          }
+        })
+
+        // Actualizar stock para cada item
+        for (const item of itemsConCosto) {
+          // Decrementar en origen
+          const stockOrigen = await tx.stock.findUnique({
+            where: { sedeId_herramientaId: { sedeId: sedeOrigenId, herramientaId: item.herramientaId } }
+          })
+          
+          if (!stockOrigen || stockOrigen.cantidad < item.cantidad) {
+            throw new Error(`Stock insuficiente para ${item.herramientaId} en sede origen`)
+          }
+
+          await tx.stock.update({
+            where: { id: stockOrigen.id },
+            data: { cantidad: { decrement: item.cantidad } }
+          })
+
+          // Incrementar en destino
+          const stockDestino = await tx.stock.findUnique({
+            where: { sedeId_herramientaId: { sedeId: sedeDestinoId, herramientaId: item.herramientaId } }
+          })
+
+          if (stockDestino) {
+            await tx.stock.update({
+              where: { id: stockDestino.id },
+              data: { 
+                cantidad: { increment: item.cantidad },
+                costoPromedio: item.costoUnitario // Mantener el costo promedio
+              }
+            })
+          } else {
+            await tx.stock.create({
+              data: {
+                sedeId: sedeDestinoId,
+                herramientaId: item.herramientaId,
+                cantidad: item.cantidad,
+                costoPromedio: item.costoUnitario
+              }
+            })
+          }
+        }
+
+        return { movimientoSalida, movimientoIngreso, esTransferencia: true }
+      }
+
+      // === OTROS TIPOS DE MOVIMIENTO ===
+      const numero = await generateMovimientoNumero(tipo)
+
       const movimiento = await tx.movimiento.create({
         data: {
           numero,
           fecha: fechaMovimiento,
           tipo,
-          sedeOrigenId: ['TRANSFERENCIA', 'SALIDA', 'BAJA'].includes(tipo) ? sedeOrigenId : null,
-          sedeDestinoId: ['COMPRA', 'TRANSFERENCIA', 'DEVOLUCION_TECNICO'].includes(tipo) ? sedeDestinoId : null,
+          sedeOrigenId: ['SALIDA', 'BAJA'].includes(tipo) ? sedeOrigenId : null,
+          sedeDestinoId: ['COMPRA', 'DEVOLUCION_TECNICO'].includes(tipo) ? sedeDestinoId : null,
           tecnicoId: ['SALIDA', 'DEVOLUCION_TECNICO'].includes(tipo) ? tecnicoId : null,
           proveedor: tipo === 'COMPRA' ? proveedor : null,
           comprobante,
           observaciones,
           usuarioId: user.id,
           items: {
-            create: items.map((item: { herramientaId: string; cantidad: number; costoUnitario: number; serial?: string; estado?: string }) => ({
+            create: itemsConCosto.map((item) => ({
               herramientaId: item.herramientaId,
-              cantidad: parseFloat(item.cantidad),
-              costoUnitario: parseFloat(item.costoUnitario) || 0,
-              costoTotal: parseFloat(item.cantidad) * parseFloat(item.costoUnitario || 0),
+              cantidad: item.cantidad,
+              costoUnitario: item.costoUnitario,
+              costoTotal: item.cantidad * item.costoUnitario,
               serial: item.serial,
               estado: item.estado
             }))
@@ -171,10 +299,7 @@ export async function POST(request: Request) {
       })
 
       // Actualizar stock según el tipo de movimiento
-      for (const item of items) {
-        const cantidad = parseFloat(item.cantidad)
-        const costoUnitario = parseFloat(item.costoUnitario) || 0
-
+      for (const item of itemsConCosto) {
         switch (tipo) {
           case 'COMPRA': {
             // Incrementar stock en sede destino
@@ -186,13 +311,13 @@ export async function POST(request: Request) {
               const nuevoCostoPromedio = calculateCostoPromedio(
                 stockExistente.cantidad,
                 stockExistente.costoPromedio,
-                cantidad,
-                costoUnitario
+                item.cantidad,
+                item.costoUnitario
               )
               await tx.stock.update({
                 where: { id: stockExistente.id },
                 data: {
-                  cantidad: { increment: cantidad },
+                  cantidad: { increment: item.cantidad },
                   costoPromedio: nuevoCostoPromedio
                 }
               })
@@ -201,8 +326,8 @@ export async function POST(request: Request) {
                 data: {
                   sedeId: sedeDestinoId,
                   herramientaId: item.herramientaId,
-                  cantidad,
-                  costoPromedio: costoUnitario
+                  cantidad: item.cantidad,
+                  costoPromedio: item.costoUnitario
                 }
               })
             }
@@ -213,50 +338,12 @@ export async function POST(request: Request) {
               const nuevoCostoGlobal = calculateCostoPromedio(
                 herramienta.costoPromedio > 0 ? 1 : 0,
                 herramienta.costoPromedio,
-                cantidad,
-                costoUnitario
+                item.cantidad,
+                item.costoUnitario
               )
               await tx.herramienta.update({
                 where: { id: item.herramientaId },
                 data: { costoPromedio: nuevoCostoGlobal }
-              })
-            }
-            break
-          }
-
-          case 'TRANSFERENCIA': {
-            // Decrementar en origen
-            const stockOrigen = await tx.stock.findUnique({
-              where: { sedeId_herramientaId: { sedeId: sedeOrigenId, herramientaId: item.herramientaId } }
-            })
-            
-            if (!stockOrigen || stockOrigen.cantidad < cantidad) {
-              throw new Error(`Stock insuficiente para ${item.herramientaId} en sede origen`)
-            }
-
-            await tx.stock.update({
-              where: { id: stockOrigen.id },
-              data: { cantidad: { decrement: cantidad } }
-            })
-
-            // Incrementar en destino
-            const stockDestino = await tx.stock.findUnique({
-              where: { sedeId_herramientaId: { sedeId: sedeDestinoId, herramientaId: item.herramientaId } }
-            })
-
-            if (stockDestino) {
-              await tx.stock.update({
-                where: { id: stockDestino.id },
-                data: { cantidad: { increment: cantidad } }
-              })
-            } else {
-              await tx.stock.create({
-                data: {
-                  sedeId: sedeDestinoId,
-                  herramientaId: item.herramientaId,
-                  cantidad,
-                  costoPromedio: stockOrigen.costoPromedio
-                }
               })
             }
             break
@@ -268,22 +355,23 @@ export async function POST(request: Request) {
               where: { sedeId_herramientaId: { sedeId: sedeOrigenId, herramientaId: item.herramientaId } }
             })
             
-            if (!stockSede || stockSede.cantidad < cantidad) {
+            if (!stockSede || stockSede.cantidad < item.cantidad) {
               throw new Error(`Stock insuficiente para ${item.herramientaId} en la sede`)
             }
 
             await tx.stock.update({
               where: { id: stockSede.id },
-              data: { cantidad: { decrement: cantidad } }
+              data: { cantidad: { decrement: item.cantidad } }
             })
 
             // Crear asignación al técnico
             await tx.asignacionTecnico.create({
               data: {
-                tecnicoId,
+                tecnicoId: tecnicoId!,
                 herramientaId: item.herramientaId,
                 sedeId: sedeOrigenId,
-                cantidad,
+                cantidad: item.cantidad,
+                cantidadDevuelta: 0,//Solo marca como "devuelto" cuando cantidadDevuelta == cantidad
                 serial: item.serial
               }
             })
@@ -291,25 +379,39 @@ export async function POST(request: Request) {
           }
 
           case 'DEVOLUCION_TECNICO': {
-            // Buscar la asignación activa
+            // CORREGIDO: Manejo de devoluciones parciales
+            // Buscar la asignación activa (con cantidad pendiente)
             const asignacion = await tx.asignacionTecnico.findFirst({
               where: {
                 tecnicoId,
                 herramientaId: item.herramientaId,
                 estado: 'asignado'
-              }
+              },
+              orderBy: { fechaAsignacion: 'asc' } // FIFO: primero en entrar, primero en salir
             })
 
             if (!asignacion) {
               throw new Error(`No se encontró asignación activa para ${item.herramientaId} al técnico`)
             }
 
-            // Marcar como devuelta
+            // Verificar que no se devuelva más de lo pendiente
+            const cantidadPendiente = asignacion.cantidad - asignacion.cantidadDevuelta
+            if (item.cantidad > cantidadPendiente) {
+              throw new Error(`Cantidad a devolver (${item.cantidad}) excede la cantidad pendiente (${cantidadPendiente})`)
+            }
+
+            // Actualizar la asignación
+            const nuevaCantidadDevuelta = asignacion.cantidadDevuelta + item.cantidad
+            const nuevaCantidadPendiente = asignacion.cantidad - nuevaCantidadDevuelta
+
             await tx.asignacionTecnico.update({
               where: { id: asignacion.id },
               data: {
-                estado: 'devuelto',
-                fechaDevolucion: new Date(),
+                cantidadDevuelta: nuevaCantidadDevuelta,
+                // Solo marcar como devuelto si se devolvió todo
+                estado: nuevaCantidadPendiente === 0 ? 'devuelto' : 'asignado',
+                fechaDevolucion: nuevaCantidadPendiente === 0 ? new Date() : null,
+                estadoHerramienta: item.estado,
                 observaciones: item.estado ? `Estado: ${item.estado}` : null
               }
             })
@@ -322,19 +424,21 @@ export async function POST(request: Request) {
             if (stockSede) {
               await tx.stock.update({
                 where: { id: stockSede.id },
-                data: { cantidad: { increment: cantidad } }
+                data: { cantidad: { increment: item.cantidad } }
               })
             } else {
               await tx.stock.create({
                 data: {
                   sedeId: sedeDestinoId,
                   herramientaId: item.herramientaId,
-                  cantidad
+                  cantidad: item.cantidad,
+                  costoPromedio: item.costoUnitario
                 }
               })
             }
             break
           }
+
 
           case 'BAJA': {
             // Decrementar stock
@@ -342,20 +446,20 @@ export async function POST(request: Request) {
               where: { sedeId_herramientaId: { sedeId: sedeOrigenId, herramientaId: item.herramientaId } }
             })
             
-            if (!stockSede || stockSede.cantidad < cantidad) {
+            if (!stockSede || stockSede.cantidad < item.cantidad) {
               throw new Error(`Stock insuficiente para dar de baja`)
             }
 
             await tx.stock.update({
               where: { id: stockSede.id },
-              data: { cantidad: { decrement: cantidad } }
+              data: { cantidad: { decrement: item.cantidad } }
             })
             break
           }
         }
       }
 
-      return movimiento
+      return { movimiento, esTransferencia: false }
     })
 
     return NextResponse.json(result, { status: 201 })
@@ -439,7 +543,72 @@ export async function PUT(request: Request) {
               break
             }
 
+            case 'TRANSFERENCIA_SALIDA':
+            case 'TRANSFERENCIA_INGRESO': {
+              // Buscar el movimiento complementario
+              const prefijo = movimiento.numero.includes('-S-') 
+                ? movimiento.numero.replace('-S-', '-I-')
+                : movimiento.numero.replace('-I-', '-S-')
+              
+              const movimientoComplementario = await tx.movimiento.findFirst({
+                where: { 
+                  numero: prefijo,
+                  anulado: false
+                }
+              })
+
+              // Anular también el movimiento complementario
+              if (movimientoComplementario && !movimientoComplementario.anulado) {
+                await tx.movimiento.update({
+                  where: { id: movimientoComplementario.id },
+                  data: {
+                    anulado: true,
+                    motivoAnulacion: `Anulado automáticamente por anulación de ${movimiento.numero}`,
+                    fechaAnulacion: new Date(),
+                    anuladoPorId: user.id
+                  }
+                })
+              }
+
+              // Revertir stock según sea salida o ingreso
+              if (movimiento.tipo === 'TRANSFERENCIA_SALIDA') {
+                // Devolver a origen
+                const stockOrigen = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimiento.sedeOrigenId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockOrigen) {
+                  await tx.stock.update({
+                    where: { id: stockOrigen.id },
+                    data: { cantidad: { increment: cantidad } }
+                  })
+                }
+              } else {
+                // Quitar de destino
+                const stockDestino = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimiento.sedeDestinoId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockDestino) {
+                  await tx.stock.update({
+                    where: { id: stockDestino.id },
+                    data: { cantidad: { decrement: cantidad } }
+                  })
+                }
+              }
+              break
+            }
+
             case 'TRANSFERENCIA': {
+              // Transferencia antigua (sin separar)
               // Revertir: devolver a origen, quitar de destino
               const stockOrigen = await tx.stock.findUnique({
                 where: { 
@@ -524,23 +693,29 @@ export async function PUT(request: Request) {
                 })
               }
 
-              // Reactivar asignación
+              // Reactivar asignación (reducir cantidadDevuelta)
               const asignacion = await tx.asignacionTecnico.findFirst({
                 where: {
                   tecnicoId: movimiento.tecnicoId!,
                   herramientaId: item.herramientaId,
-                  estado: 'devuelto'
+                  cantidadDevuelta: { gt: 0 }
                 },
                 orderBy: { fechaDevolucion: 'desc' }
               })
               if (asignacion) {
+                const nuevaCantidadDevuelta = asignacion.cantidadDevuelta - cantidad
                 await tx.asignacionTecnico.update({
                   where: { id: asignacion.id },
-                  data: { estado: 'asignado', fechaDevolucion: null }
+                  data: { 
+                    cantidadDevuelta: nuevaCantidadDevuelta,
+                    estado: 'asignado',
+                    fechaDevolucion: null
+                  }
                 })
               }
               break
             }
+
 
             case 'BAJA': {
               // Revertir: devolver stock
@@ -568,371 +743,412 @@ export async function PUT(request: Request) {
     }
 
     // Si es edición
-  // Si es edición
-if (accion === 'editar') {
-  const { fecha, proveedor, comprobante, observaciones, items } = body
+    if (accion === 'editar') {
+      const { fecha, proveedor, comprobante, observaciones, items } = body
 
-  // Validar fecha
-  let fechaMovimiento = undefined
-  if (fecha) {
-    fechaMovimiento = new Date(fecha)
-    
-    const hoy = new Date()
-    hoy.setHours(23, 59, 59, 999)
-    if (fechaMovimiento > hoy) {
-      return NextResponse.json({ error: 'La fecha no puede ser futura' }, { status: 400 })
-    }
-    
-    const haceUnMes = new Date()
-    haceUnMes.setMonth(haceUnMes.getMonth() - 1)
-    haceUnMes.setHours(0, 0, 0, 0)
-    if (fechaMovimiento < haceUnMes) {
-      return NextResponse.json({ error: 'La fecha no puede ser anterior a un mes' }, { status: 400 })
-    }
-  }
-
-  const movimientoActual = await db.movimiento.findUnique({
-    where: { id },
-    include: { items: true }
-  })
-
-  if (!movimientoActual) {
-    return NextResponse.json({ error: 'Movimiento no encontrado' }, { status: 404 })
-  }
-
-  if (movimientoActual.anulado) {
-    return NextResponse.json({ error: 'No se puede editar un movimiento anulado' }, { status: 400 })
-  }
-
-  // Si hay items para editar, actualizar stock
-  if (items && items.length > 0) {
-    await db.$transaction(async (tx) => {
-      // 1. Revertir el efecto de los items antiguos
-      for (const itemAntiguo of movimientoActual.items) {
-        const cantidadAntigua = itemAntiguo.cantidad
-
-        switch (movimientoActual.tipo) {
-          case 'COMPRA': {
-            const stock = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeDestinoId!, 
-                  herramientaId: itemAntiguo.herramientaId 
-                } 
-              }
-            })
-            if (stock) {
-              await tx.stock.update({
-                where: { id: stock.id },
-                data: { cantidad: { decrement: cantidadAntigua } }
-              })
-            }
-            break
-          }
-          case 'TRANSFERENCIA': {
-            // Devolver a origen
-            const stockOrigen = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeOrigenId!, 
-                  herramientaId: itemAntiguo.herramientaId 
-                } 
-              }
-            })
-            if (stockOrigen) {
-              await tx.stock.update({
-                where: { id: stockOrigen.id },
-                data: { cantidad: { increment: cantidadAntigua } }
-              })
-            }
-            // Quitar de destino
-            const stockDestino = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeDestinoId!, 
-                  herramientaId: itemAntiguo.herramientaId 
-                } 
-              }
-            })
-            if (stockDestino) {
-              await tx.stock.update({
-                where: { id: stockDestino.id },
-                data: { cantidad: { decrement: cantidadAntigua } }
-              })
-            }
-            break
-          }
-          case 'SALIDA': {
-            const stockSede = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeOrigenId!, 
-                  herramientaId: itemAntiguo.herramientaId 
-                } 
-              }
-            })
-            if (stockSede) {
-              await tx.stock.update({
-                where: { id: stockSede.id },
-                data: { cantidad: { increment: cantidadAntigua } }
-              })
-            }
-            // Quitar asignación
-            const asignacion = await tx.asignacionTecnico.findFirst({
-              where: {
-                tecnicoId: movimientoActual.tecnicoId!,
-                herramientaId: itemAntiguo.herramientaId,
-                estado: 'asignado'
-              }
-            })
-            if (asignacion) {
-              await tx.asignacionTecnico.update({
-                where: { id: asignacion.id },
-                data: { estado: 'devuelto', fechaDevolucion: new Date() }
-              })
-            }
-            break
-          }
-          case 'DEVOLUCION_TECNICO': {
-            const stockSede = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeDestinoId!, 
-                  herramientaId: itemAntiguo.herramientaId 
-                } 
-              }
-            })
-            if (stockSede) {
-              await tx.stock.update({
-                where: { id: stockSede.id },
-                data: { cantidad: { decrement: cantidadAntigua } }
-              })
-            }
-            // Reactivar asignación
-            const asignacion = await tx.asignacionTecnico.findFirst({
-              where: {
-                tecnicoId: movimientoActual.tecnicoId!,
-                herramientaId: itemAntiguo.herramientaId,
-                estado: 'devuelto'
-              },
-              orderBy: { fechaDevolucion: 'desc' }
-            })
-            if (asignacion) {
-              await tx.asignacionTecnico.update({
-                where: { id: asignacion.id },
-                data: { estado: 'asignado', fechaDevolucion: null }
-              })
-            }
-            break
-          }
-          case 'BAJA': {
-            const stockSede = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeOrigenId!, 
-                  herramientaId: itemAntiguo.herramientaId 
-                } 
-              }
-            })
-            if (stockSede) {
-              await tx.stock.update({
-                where: { id: stockSede.id },
-                data: { cantidad: { increment: cantidadAntigua } }
-              })
-            }
-            break
-          }
+      // Validar fecha
+      let fechaMovimiento: Date | undefined = undefined
+      if (fecha) {
+        fechaMovimiento = new Date(fecha + 'T12:00:00')
+        
+        const hoy = new Date()
+        hoy.setHours(23, 59, 59, 999)
+        if (fechaMovimiento > hoy) {
+          return NextResponse.json({ error: 'La fecha no puede ser futura' }, { status: 400 })
+        }
+        
+        const haceUnMes = new Date()
+        haceUnMes.setMonth(haceUnMes.getMonth() - 1)
+        haceUnMes.setHours(0, 0, 0, 0)
+        if (fechaMovimiento < haceUnMes) {
+          return NextResponse.json({ error: 'La fecha no puede ser anterior a un mes' }, { status: 400 })
         }
       }
 
-      // 2. Eliminar items antiguos
-      await tx.movimientoItem.deleteMany({ where: { movimientoId: id } })
+      const movimientoActual = await db.movimiento.findUnique({
+        where: { id },
+        include: { items: true }
+      })
 
-      // 3. Crear nuevos items
-      const nuevosItems = items.map((item: { herramientaId: string; cantidad: number; costoUnitario: number; serial?: string }) => ({
-        movimientoId: id,
-        herramientaId: item.herramientaId,
-        cantidad: parseFloat(item.cantidad),
-        costoUnitario: parseFloat(item.costoUnitario) || 0,
-        costoTotal: parseFloat(item.cantidad) * parseFloat(item.costoUnitario || 0),
-        serial: item.serial
-      }))
-
-      await tx.movimientoItem.createMany({ data: nuevosItems })
-
-      // 4. Aplicar el efecto de los nuevos items
-      for (const item of items) {
-        const cantidad = parseFloat(item.cantidad)
-        const costoUnitario = parseFloat(item.costoUnitario) || 0
-
-        switch (movimientoActual.tipo) {
-          case 'COMPRA': {
-            const stockExistente = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeDestinoId!, 
-                  herramientaId: item.herramientaId 
-                } 
-              }
-            })
-            if (stockExistente) {
-              const nuevoCostoPromedio = calculateCostoPromedio(
-                stockExistente.cantidad,
-                stockExistente.costoPromedio,
-                cantidad,
-                costoUnitario
-              )
-              await tx.stock.update({
-                where: { id: stockExistente.id },
-                data: {
-                  cantidad: { increment: cantidad },
-                  costoPromedio: nuevoCostoPromedio
-                }
-              })
-            } else {
-              await tx.stock.create({
-                data: {
-                  sedeId: movimientoActual.sedeDestinoId!,
-                  herramientaId: item.herramientaId,
-                  cantidad,
-                  costoPromedio: costoUnitario
-                }
-              })
-            }
-            break
-          }
-          case 'TRANSFERENCIA': {
-            const stockOrigen = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeOrigenId!, 
-                  herramientaId: item.herramientaId 
-                } 
-              }
-            })
-            if (!stockOrigen || stockOrigen.cantidad < cantidad) {
-              throw new Error(`Stock insuficiente para ${item.herramientaId} en sede origen`)
-            }
-            await tx.stock.update({
-              where: { id: stockOrigen.id },
-              data: { cantidad: { decrement: cantidad } }
-            })
-
-            const stockDestino = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeDestinoId!, 
-                  herramientaId: item.herramientaId 
-                } 
-              }
-            })
-            if (stockDestino) {
-              await tx.stock.update({
-                where: { id: stockDestino.id },
-                data: { cantidad: { increment: cantidad } }
-              })
-            } else {
-              await tx.stock.create({
-                data: {
-                  sedeId: movimientoActual.sedeDestinoId!,
-                  herramientaId: item.herramientaId,
-                  cantidad,
-                  costoPromedio: stockOrigen.costoPromedio
-                }
-              })
-            }
-            break
-          }
-          case 'SALIDA': {
-            const stockSede = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeOrigenId!, 
-                  herramientaId: item.herramientaId 
-                } 
-              }
-            })
-            if (!stockSede || stockSede.cantidad < cantidad) {
-              throw new Error(`Stock insuficiente para ${item.herramientaId} en la sede`)
-            }
-            await tx.stock.update({
-              where: { id: stockSede.id },
-              data: { cantidad: { decrement: cantidad } }
-            })
-
-            await tx.asignacionTecnico.create({
-              data: {
-                tecnicoId: movimientoActual.tecnicoId!,
-                herramientaId: item.herramientaId,
-                sedeId: movimientoActual.sedeOrigenId!,
-                cantidad,
-                serial: item.serial
-              }
-            })
-            break
-          }
-          case 'DEVOLUCION_TECNICO': {
-            const stockSede = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeDestinoId!, 
-                  herramientaId: item.herramientaId 
-                } 
-              }
-            })
-            if (stockSede) {
-              await tx.stock.update({
-                where: { id: stockSede.id },
-                data: { cantidad: { increment: cantidad } }
-              })
-            } else {
-              await tx.stock.create({
-                data: {
-                  sedeId: movimientoActual.sedeDestinoId!,
-                  herramientaId: item.herramientaId,
-                  cantidad
-                }
-              })
-            }
-
-            const asignacion = await tx.asignacionTecnico.findFirst({
-              where: {
-                tecnicoId: movimientoActual.tecnicoId!,
-                herramientaId: item.herramientaId,
-                estado: 'asignado'
-              }
-            })
-            if (asignacion) {
-              await tx.asignacionTecnico.update({
-                where: { id: asignacion.id },
-                data: { estado: 'devuelto', fechaDevolucion: new Date() }
-              })
-            }
-            break
-          }
-          case 'BAJA': {
-            const stockSede = await tx.stock.findUnique({
-              where: { 
-                sedeId_herramientaId: { 
-                  sedeId: movimientoActual.sedeOrigenId!, 
-                  herramientaId: item.herramientaId 
-                } 
-              }
-            })
-            if (!stockSede || stockSede.cantidad < cantidad) {
-              throw new Error(`Stock insuficiente para dar de baja`)
-            }
-            await tx.stock.update({
-              where: { id: stockSede.id },
-              data: { cantidad: { decrement: cantidad } }
-            })
-            break
-          }
-        }
+      if (!movimientoActual) {
+        return NextResponse.json({ error: 'Movimiento no encontrado' }, { status: 404 })
       }
 
-      // 5. Actualizar cabecera del movimiento
-      await tx.movimiento.update({
+      if (movimientoActual.anulado) {
+        return NextResponse.json({ error: 'No se puede editar un movimiento anulado' }, { status: 400 })
+      }
+
+      // No permitir editar transferencias (deben anularse y crearse de nuevo)
+      if (movimientoActual.tipo === 'TRANSFERENCIA_SALIDA' || movimientoActual.tipo === 'TRANSFERENCIA_INGRESO') {
+        return NextResponse.json({ error: 'Las transferencias no se pueden editar. Debe anularlas y crear una nueva.' }, { status: 400 })
+      }
+
+      // Si hay items para editar, actualizar stock
+      if (items && items.length > 0) {
+        // Obtener costo promedio para items sin costo
+        const itemsConCosto = await Promise.all(items.map(async (item: { herramientaId: string; cantidad: number; costoUnitario: number; serial?: string; estado?: string }) => {
+          let costoUnitario = parseFloat(item.costoUnitario) || 0
+          
+          if (movimientoActual.tipo !== 'COMPRA' && costoUnitario === 0) {
+            const herramienta = await db.herramienta.findUnique({
+              where: { id: item.herramientaId },
+              select: { costoPromedio: true }
+            })
+            costoUnitario = herramienta?.costoPromedio || 0
+          }
+          
+          return {
+            ...item,
+            costoUnitario,
+            cantidad: parseFloat(item.cantidad)
+          }
+        }))
+
+        await db.$transaction(async (tx) => {
+          // 1. Revertir el efecto de los items antiguos
+          for (const itemAntiguo of movimientoActual.items) {
+            const cantidadAntigua = itemAntiguo.cantidad
+
+            switch (movimientoActual.tipo) {
+              case 'COMPRA': {
+                const stock = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeDestinoId!, 
+                      herramientaId: itemAntiguo.herramientaId 
+                    } 
+                  }
+                })
+                if (stock) {
+                  await tx.stock.update({
+                    where: { id: stock.id },
+                    data: { cantidad: { decrement: cantidadAntigua } }
+                  })
+                }
+                break
+              }
+              case 'TRANSFERENCIA': {
+                // Devolver a origen
+                const stockOrigen = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeOrigenId!, 
+                      herramientaId: itemAntiguo.herramientaId 
+                    } 
+                  }
+                })
+                if (stockOrigen) {
+                  await tx.stock.update({
+                    where: { id: stockOrigen.id },
+                    data: { cantidad: { increment: cantidadAntigua } }
+                  })
+                }
+                // Quitar de destino
+                const stockDestino = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeDestinoId!, 
+                      herramientaId: itemAntiguo.herramientaId 
+                    } 
+                  }
+                })
+                if (stockDestino) {
+                  await tx.stock.update({
+                    where: { id: stockDestino.id },
+                    data: { cantidad: { decrement: cantidadAntigua } }
+                  })
+                }
+                break
+              }
+              case 'SALIDA': {
+                const stockSede = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeOrigenId!, 
+                      herramientaId: itemAntiguo.herramientaId 
+                    } 
+                  }
+                })
+                if (stockSede) {
+                  await tx.stock.update({
+                    where: { id: stockSede.id },
+                    data: { cantidad: { increment: cantidadAntigua } }
+                  })
+                }
+                // Quitar asignación
+                const asignacion = await tx.asignacionTecnico.findFirst({
+                  where: {
+                    tecnicoId: movimientoActual.tecnicoId!,
+                    herramientaId: itemAntiguo.herramientaId,
+                    estado: 'asignado'
+                  }
+                })
+                if (asignacion) {
+                  await tx.asignacionTecnico.update({
+                    where: { id: asignacion.id },
+                    data: { estado: 'devuelto', fechaDevolucion: new Date() }
+                  })
+                }
+                break
+              }
+              case 'DEVOLUCION_TECNICO': {
+                const stockSede = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeDestinoId!, 
+                      herramientaId: itemAntiguo.herramientaId 
+                    } 
+                  }
+                })
+                if (stockSede) {
+                  await tx.stock.update({
+                    where: { id: stockSede.id },
+                    data: { cantidad: { decrement: cantidadAntigua } }
+                  })
+                }
+                // Reactivar asignación
+                const asignacion = await tx.asignacionTecnico.findFirst({
+                  where: {
+                    tecnicoId: movimientoActual.tecnicoId!,
+                    herramientaId: itemAntiguo.herramientaId,
+                    estado: 'devuelto'
+                  },
+                  orderBy: { fechaDevolucion: 'desc' }
+                })
+                if (asignacion) {
+                  await tx.asignacionTecnico.update({
+                    where: { id: asignacion.id },
+                    data: { estado: 'asignado', fechaDevolucion: null }
+                  })
+                }
+                break
+              }
+              case 'BAJA': {
+                const stockSede = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeOrigenId!, 
+                      herramientaId: itemAntiguo.herramientaId 
+                    } 
+                  }
+                })
+                if (stockSede) {
+                  await tx.stock.update({
+                    where: { id: stockSede.id },
+                    data: { cantidad: { increment: cantidadAntigua } }
+                  })
+                }
+                break
+              }
+            }
+          }
+
+          // 2. Eliminar items antiguos
+          await tx.movimientoItem.deleteMany({ where: { movimientoId: id } })
+
+          // 3. Crear nuevos items
+          const nuevosItems = itemsConCosto.map((item) => ({
+            movimientoId: id,
+            herramientaId: item.herramientaId,
+            cantidad: item.cantidad,
+            costoUnitario: item.costoUnitario,
+            costoTotal: item.cantidad * item.costoUnitario,
+            serial: item.serial,
+            estado: item.estado
+          }))
+
+          await tx.movimientoItem.createMany({ data: nuevosItems })
+
+          // 4. Aplicar el efecto de los nuevos items
+          for (const item of itemsConCosto) {
+            switch (movimientoActual.tipo) {
+              case 'COMPRA': {
+                const stockExistente = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeDestinoId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockExistente) {
+                  const nuevoCostoPromedio = calculateCostoPromedio(
+                    stockExistente.cantidad,
+                    stockExistente.costoPromedio,
+                    item.cantidad,
+                    item.costoUnitario
+                  )
+                  await tx.stock.update({
+                    where: { id: stockExistente.id },
+                    data: {
+                      cantidad: { increment: item.cantidad },
+                      costoPromedio: nuevoCostoPromedio
+                    }
+                  })
+                } else {
+                  await tx.stock.create({
+                    data: {
+                      sedeId: movimientoActual.sedeDestinoId!,
+                      herramientaId: item.herramientaId,
+                      cantidad: item.cantidad,
+                      costoPromedio: item.costoUnitario
+                    }
+                  })
+                }
+                break
+              }
+              case 'TRANSFERENCIA': {
+                const stockOrigen = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeOrigenId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (!stockOrigen || stockOrigen.cantidad < item.cantidad) {
+                  throw new Error(`Stock insuficiente para ${item.herramientaId} en sede origen`)
+                }
+                await tx.stock.update({
+                  where: { id: stockOrigen.id },
+                  data: { cantidad: { decrement: item.cantidad } }
+                })
+
+                const stockDestino = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeDestinoId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockDestino) {
+                  await tx.stock.update({
+                    where: { id: stockDestino.id },
+                    data: { cantidad: { increment: item.cantidad } }
+                  })
+                } else {
+                  await tx.stock.create({
+                    data: {
+                      sedeId: movimientoActual.sedeDestinoId!,
+                      herramientaId: item.herramientaId,
+                      cantidad: item.cantidad,
+                      costoPromedio: item.costoUnitario
+                    }
+                  })
+                }
+                break
+              }
+              case 'SALIDA': {
+                const stockSede = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeOrigenId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (!stockSede || stockSede.cantidad < item.cantidad) {
+                  throw new Error(`Stock insuficiente para ${item.herramientaId} en la sede`)
+                }
+                await tx.stock.update({
+                  where: { id: stockSede.id },
+                  data: { cantidad: { decrement: item.cantidad } }
+                })
+
+                await tx.asignacionTecnico.create({
+                  data: {
+                    tecnicoId: movimientoActual.tecnicoId!,
+                    herramientaId: item.herramientaId,
+                    sedeId: movimientoActual.sedeOrigenId!,
+                    cantidad: item.cantidad,
+                    serial: item.serial
+                  }
+                })
+                break
+              }
+              case 'DEVOLUCION_TECNICO': {
+                const stockSede = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeDestinoId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockSede) {
+                  await tx.stock.update({
+                    where: { id: stockSede.id },
+                    data: { cantidad: { increment: item.cantidad } }
+                  })
+                } else {
+                  await tx.stock.create({
+                    data: {
+                      sedeId: movimientoActual.sedeDestinoId!,
+                      herramientaId: item.herramientaId,
+                      cantidad: item.cantidad,
+                      costoPromedio: item.costoUnitario
+                    }
+                  })
+                }
+
+                const asignacion = await tx.asignacionTecnico.findFirst({
+                  where: {
+                    tecnicoId: movimientoActual.tecnicoId!,
+                    herramientaId: item.herramientaId,
+                    estado: 'asignado'
+                  }
+                })
+                if (asignacion) {
+                  await tx.asignacionTecnico.update({
+                    where: { id: asignacion.id },
+                    data: { 
+                      estado: 'devuelto', 
+                      fechaDevolucion: new Date(),
+                      estadoHerramienta: item.estado
+                    }
+                  })
+                }
+                break
+              }
+              case 'BAJA': {
+                const stockSede = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimientoActual.sedeOrigenId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (!stockSede || stockSede.cantidad < item.cantidad) {
+                  throw new Error(`Stock insuficiente para dar de baja`)
+                }
+                await tx.stock.update({
+                  where: { id: stockSede.id },
+                  data: { cantidad: { decrement: item.cantidad } }
+                })
+                break
+              }
+            }
+          }
+
+          // 5. Actualizar cabecera del movimiento
+          await tx.movimiento.update({
+            where: { id },
+            data: {
+              fecha: fechaMovimiento,
+              proveedor,
+              comprobante,
+              observaciones
+            }
+          })
+        })
+
+        return NextResponse.json({ message: 'Movimiento actualizado correctamente' })
+      }
+
+      // Si solo se edita la cabecera (sin items)
+      const movimiento = await db.movimiento.update({
         where: { id },
         data: {
           fecha: fechaMovimiento,
@@ -941,24 +1157,9 @@ if (accion === 'editar') {
           observaciones
         }
       })
-    })
 
-    return NextResponse.json({ message: 'Movimiento actualizado correctamente' })
-  }
-
-  // Si solo se edita la cabecera (sin items)
-  const movimiento = await db.movimiento.update({
-    where: { id },
-    data: {
-      fecha: fechaMovimiento,
-      proveedor,
-      comprobante,
-      observaciones
-    }
-  })
-
-  return NextResponse.json(movimiento)
-}  
+      return NextResponse.json(movimiento)
+    }  
 
     return NextResponse.json({ error: 'Acción no válida' }, { status: 400 })
   } catch (error) {
@@ -1013,6 +1214,90 @@ export async function DELETE(request: Request) {
                   where: { id: stock.id },
                   data: { cantidad: { decrement: cantidad } }
                 })
+              }
+              break
+            }
+            case 'TRANSFERENCIA_SALIDA':
+            case 'TRANSFERENCIA_INGRESO': {
+              // Buscar y eliminar también el movimiento complementario
+              const prefijo = movimiento.numero.includes('-S-') 
+                ? movimiento.numero.replace('-S-', '-I-')
+                : movimiento.numero.replace('-I-', '-S-')
+              
+              const movimientoComplementario = await tx.movimiento.findFirst({
+                where: { numero: prefijo }
+              })
+
+              if (movimientoComplementario) {
+                // Revertir stock del complementario
+                for (const itemComp of movimientoComplementario.items) {
+                  if (movimientoComplementario.tipo === 'TRANSFERENCIA_SALIDA') {
+                    const stockOrigen = await tx.stock.findUnique({
+                      where: { 
+                        sedeId_herramientaId: { 
+                          sedeId: movimientoComplementario.sedeOrigenId!, 
+                          herramientaId: itemComp.herramientaId 
+                        } 
+                      }
+                    })
+                    if (stockOrigen) {
+                      await tx.stock.update({
+                        where: { id: stockOrigen.id },
+                        data: { cantidad: { increment: itemComp.cantidad } }
+                      })
+                    }
+                  } else {
+                    const stockDestino = await tx.stock.findUnique({
+                      where: { 
+                        sedeId_herramientaId: { 
+                          sedeId: movimientoComplementario.sedeDestinoId!, 
+                          herramientaId: itemComp.herramientaId 
+                        } 
+                      }
+                    })
+                    if (stockDestino) {
+                      await tx.stock.update({
+                        where: { id: stockDestino.id },
+                        data: { cantidad: { decrement: itemComp.cantidad } }
+                      })
+                    }
+                  }
+                }
+                await tx.movimientoItem.deleteMany({ where: { movimientoId: movimientoComplementario.id } })
+                await tx.movimiento.delete({ where: { id: movimientoComplementario.id } })
+              }
+
+              // Revertir stock del movimiento actual
+              if (movimiento.tipo === 'TRANSFERENCIA_SALIDA') {
+                const stockOrigen = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimiento.sedeOrigenId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockOrigen) {
+                  await tx.stock.update({
+                    where: { id: stockOrigen.id },
+                    data: { cantidad: { increment: cantidad } }
+                  })
+                }
+              } else {
+                const stockDestino = await tx.stock.findUnique({
+                  where: { 
+                    sedeId_herramientaId: { 
+                      sedeId: movimiento.sedeDestinoId!, 
+                      herramientaId: item.herramientaId 
+                    } 
+                  }
+                })
+                if (stockDestino) {
+                  await tx.stock.update({
+                    where: { id: stockDestino.id },
+                    data: { cantidad: { decrement: cantidad } }
+                  })
+                }
               }
               break
             }

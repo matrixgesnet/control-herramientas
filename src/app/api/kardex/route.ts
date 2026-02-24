@@ -47,15 +47,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Herramienta no encontrada' }, { status: 404 })
     }
 
-    // Construir filtros
+    // Construir filtros - SIEMPRE excluir movimientos anulados
     const where: Prisma.MovimientoItemWhereInput = {
-      herramientaId
+      herramientaId,
+      movimiento: {
+        anulado: false  // No mostrar movimientos anulados
+      }
     }
 
     if (fechaDesde || fechaHasta) {
-      where.movimiento = {
-        fecha: {}
-      }
+      (where.movimiento as Prisma.MovimientoWhereInput).fecha = {}
       if (fechaDesde) {
         (where.movimiento as Prisma.MovimientoWhereInput).fecha = {
           ...(where.movimiento as Prisma.MovimientoWhereInput).fecha,
@@ -93,7 +94,11 @@ export async function GET(request: Request) {
           const mov = item.movimiento
           // Compras hacia esta sede
           if (mov.tipo === 'COMPRA' && mov.sedeDestinoId === sedeId) return true
-          // Transferencias desde o hacia esta sede
+          // Transferencias SALIDA desde esta sede
+          if (mov.tipo === 'TRANSFERENCIA_SALIDA' && mov.sedeOrigenId === sedeId) return true
+          // Transferencias INGRESO hacia esta sede
+          if (mov.tipo === 'TRANSFERENCIA_INGRESO' && mov.sedeDestinoId === sedeId) return true
+          // Transferencias antiguas (sin separar)
           if (mov.tipo === 'TRANSFERENCIA') {
             return mov.sedeOrigenId === sedeId || mov.sedeDestinoId === sedeId
           }
@@ -133,12 +138,22 @@ export async function GET(request: Request) {
       let salida = 0
       let sedeOrigen = mov.sedeOrigen?.nombre
       let sedeDestino = mov.sedeDestino?.nombre
+      let tipoDisplay = mov.tipo
 
       switch (mov.tipo) {
         case 'COMPRA':
           ingreso = item.cantidad
           break
+        case 'TRANSFERENCIA_SALIDA':
+          salida = item.cantidad
+          tipoDisplay = 'TRANSF. SALIDA'
+          break
+        case 'TRANSFERENCIA_INGRESO':
+          ingreso = item.cantidad
+          tipoDisplay = 'TRANSF. INGRESO'
+          break
         case 'TRANSFERENCIA':
+          // Transferencia antigua (sin separar)
           if (sedeId) {
             if (mov.sedeDestinoId === sedeId) {
               ingreso = item.cantidad
@@ -155,6 +170,7 @@ export async function GET(request: Request) {
           break
         case 'DEVOLUCION_TECNICO':
           ingreso = item.cantidad
+          tipoDisplay = 'DEVOLUCIÓN'
           break
         case 'BAJA':
           salida = item.cantidad
@@ -166,7 +182,7 @@ export async function GET(request: Request) {
       const entry: KardexEntry = {
         fecha: mov.fecha,
         numeroMovimiento: mov.numero,
-        tipo: mov.tipo,
+        tipo: tipoDisplay,
         sedeOrigen,
         sedeDestino,
         tecnico: mov.tecnico ? `${mov.tecnico.nombre} ${mov.tecnico.apellido || ''}`.trim() : undefined,

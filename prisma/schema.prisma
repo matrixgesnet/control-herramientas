@@ -146,7 +146,7 @@ model Movimiento {
   id              String    @id @default(cuid())
   numero          String    @unique
   fecha           DateTime  @default(now())
-  tipo            String    // COMPRA, TRANSFERENCIA, SALIDA, DEVOLUCION_TECNICO, BAJA
+  tipo            String    // COMPRA, TRANSFERENCIA, TRANSFERENCIA_SALIDA, TRANSFERENCIA_INGRESO, SALIDA, DEVOLUCION_TECNICO, BAJA
   sedeOrigenId    String?
   sedeDestinoId   String?
   tecnicoId       String?
@@ -192,9 +192,10 @@ model AsignacionTecnico {
   herramientaId     String
   sedeId            String
   cantidad          Float     @default(1)
+  cantidadDevuelta  Float     @default(0)  // NUEVO: Para tracking de devoluciones parciales
   fechaAsignacion   DateTime  @default(now())
   fechaDevolucion   DateTime?
-  estado            String    @default("asignado") // asignado, devuelto
+  estado            String    @default("asignado") // Solo "devuelto" cuando cantidadDevuelta == cantidad
   estadoHerramienta String?   // BUENO, USADO, REPARADO, DANADO
   serial            String?
   observaciones     String?

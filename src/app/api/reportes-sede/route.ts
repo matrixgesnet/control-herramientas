@@ -39,15 +39,34 @@ export async function GET(request: Request) {
       orderBy: { codigo: 'asc' }
     })
 
-    // Obtener asignaciones activas de técnicos de esta sede
+    // CORREGIDO: Obtener todas las asignaciones de técnicos de esta sede
+    // y calcular la cantidad pendiente (cantidad - cantidadDevuelta)
     const asignaciones = await db.asignacionTecnico.findMany({
       where: {
-        tecnico: { sedeId },
-        estado: 'asignado'
+        tecnico: { sedeId }
       },
       include: {
         tecnico: true,
         herramienta: true
+      }
+    })
+
+    // Calcular cantidad pendiente por técnico y herramienta
+    const cantidadPorTecnicoHerramienta: Record<string, Record<string, number>> = {}
+    
+    asignaciones.forEach(asignacion => {
+      const tecnicoId = asignacion.tecnicoId
+      const herramientaId = asignacion.herramientaId
+      const cantidadPendiente = asignacion.cantidad - asignacion.cantidadDevuelta
+      
+      if (cantidadPendiente > 0) {
+        if (!cantidadPorTecnicoHerramienta[tecnicoId]) {
+          cantidadPorTecnicoHerramienta[tecnicoId] = {}
+        }
+        if (!cantidadPorTecnicoHerramienta[tecnicoId][herramientaId]) {
+          cantidadPorTecnicoHerramienta[tecnicoId][herramientaId] = 0
+        }
+        cantidadPorTecnicoHerramienta[tecnicoId][herramientaId] += cantidadPendiente
       }
     })
 
@@ -76,10 +95,13 @@ export async function GET(request: Request) {
       tecnicos.forEach(tecnico => {
         const asignacion = asignacionesHerramienta.find(a => a.tecnicoId === tecnico.id)
         if (asignacion) {
+          // CORRECTO - usa cantidad pendiente (no devuelta)
+          const cantidadPendiente = cantidadPorTecnicoHerramienta[tecnico.id]?.[herramienta.id] || 0
+
           datosPorTecnico[tecnico.id] = {
-            cantidad: asignacion.cantidad,
-            estado: asignacion.estadoHerramienta
-          }
+          cantidad: cantidadPendiente,  // ← Ahora muestra solo lo que NO ha devuelto
+          estado: null
+        }
         } else {
           datosPorTecnico[tecnico.id] = {
             cantidad: 0,

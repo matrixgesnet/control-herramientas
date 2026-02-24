@@ -71,9 +71,40 @@ export async function GET(request: Request) {
       orderBy: { fecha: 'desc' }
     })
 
-    // Separar asignaciones pendientes y devueltas
-    const pendientes = asignaciones.filter(a => a.estado === 'asignado')
-    const devueltas = asignaciones.filter(a => a.estado === 'devuelto')
+    // CORREGIDO: Calcular pendientes y devueltas correctamente
+    // Pendientes: cantidad - cantidadDevuelta > 0
+    const pendientes = asignaciones
+      .filter(a => (a.cantidad - a.cantidadDevuelta) > 0)
+      .map(a => ({
+        id: a.id,
+        herramientaId: a.herramientaId,
+        codigo: a.herramienta.codigo,
+        nombre: a.herramienta.nombre,
+        categoria: a.herramienta.categoria?.nombre || null,
+        cantidad: a.cantidad - a.cantidadDevuelta, // Cantidad pendiente real
+        cantidadOriginal: a.cantidad,
+        cantidadDevuelta: a.cantidadDevuelta,
+        fechaAsignacion: a.fechaAsignacion,
+        serial: a.serial,
+        sedeAsignacion: tecnico.sede?.nombre || null
+      }))
+
+    // Devueltas: Asignaciones donde cantidadDevuelta > 0
+    const devueltas = asignaciones
+      .filter(a => a.cantidadDevuelta > 0)
+      .map(a => ({
+        id: a.id,
+        herramientaId: a.herramientaId,
+        codigo: a.herramienta.codigo,
+        nombre: a.herramienta.nombre,
+        categoria: a.herramienta.categoria?.nombre || null,
+        cantidad: a.cantidadDevuelta, // Cantidad realmente devuelta
+        cantidadOriginal: a.cantidad,
+        fechaAsignacion: a.fechaAsignacion,
+        fechaDevolucion: a.fechaDevolucion,
+        observaciones: a.observaciones,
+        estadoHerramienta: a.estadoHerramienta
+      }))
 
     // Calcular totales
     const totalPendiente = pendientes.reduce((sum, a) => sum + a.cantidad, 0)
@@ -143,28 +174,8 @@ export async function GET(request: Request) {
         cantidadPendientes: pendientes.length,
         cantidadDevueltas: devueltas.length
       },
-      pendientes: pendientes.map(a => ({
-        id: a.id,
-        herramientaId: a.herramientaId,
-        codigo: a.herramienta.codigo,
-        nombre: a.herramienta.nombre,
-        categoria: a.herramienta.categoria?.nombre,
-        cantidad: a.cantidad,
-        fechaAsignacion: a.fechaAsignacion,
-        serial: a.serial,
-        sedeAsignacion: tecnico.sede?.nombre
-      })),
-      devueltas: devueltas.map(a => ({
-        id: a.id,
-        herramientaId: a.herramientaId,
-        codigo: a.herramienta.codigo,
-        nombre: a.herramienta.nombre,
-        categoria: a.herramienta.categoria?.nombre,
-        cantidad: a.cantidad,
-        fechaAsignacion: a.fechaAsignacion,
-        fechaDevolucion: a.fechaDevolucion,
-        observaciones: a.observaciones
-      })),
+      pendientes,
+      devueltas,
       historial
     })
   } catch (error) {

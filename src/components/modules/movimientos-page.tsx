@@ -116,9 +116,19 @@ async function eliminarMovimiento(id: string) {
 const tipoLabels: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
   COMPRA: { label: 'Compra', color: 'bg-green-100 text-green-700', icon: <ShoppingCart className="w-4 h-4" /> },
   TRANSFERENCIA: { label: 'Transferencia', color: 'bg-blue-100 text-blue-700', icon: <ArrowRightLeft className="w-4 h-4" /> },
+  TRANSFERENCIA_SALIDA: { label: 'Transf. Salida', color: 'bg-blue-100 text-blue-700', icon: <ArrowRightLeft className="w-4 h-4" /> },
+  TRANSFERENCIA_INGRESO: { label: 'Transf. Ingreso', color: 'bg-cyan-100 text-cyan-700', icon: <ArrowRightLeft className="w-4 h-4" /> },
   SALIDA: { label: 'Salida a Técnico', color: 'bg-orange-100 text-orange-700', icon: <UserMinus className="w-4 h-4" /> },
   DEVOLUCION_TECNICO: { label: 'Devolución Técnico', color: 'bg-purple-100 text-purple-700', icon: <RotateCcw className="w-4 h-4" /> },
   BAJA: { label: 'Baja', color: 'bg-red-100 text-red-700', icon: <Trash2 className="w-4 h-4" /> }
+}
+
+const estadoLabels: Record<string, string> = {
+  BUENO: 'Bueno',
+  USADO: 'Usado',
+  REPARADO: 'Reparado',
+  DAÑADO: 'Dañado',
+  EN_MANTENIMIENTO: 'En Mantenimiento'
 }
 
 // Fecha máxima: hoy
@@ -132,6 +142,16 @@ const getMinFecha = () => {
   const fecha = new Date()
   fecha.setMonth(fecha.getMonth() - 1)
   return fecha.toISOString().split('T')[0]
+}
+
+// Helper para obtener nombre de herramienta de forma segura
+const getHerramientaDisplay = (herramientaId: string, herramientas: Record<string, unknown>[] | undefined): string => {
+  if (!herramientas || !herramientaId) return ''
+  const h = herramientas.find((item) => item.id === herramientaId)
+  if (!h) return ''
+  const codigo = (h.codigo as string) || ''
+  const nombre = (h.nombre as string) || ''
+  return `${codigo} - ${nombre}`
 }
 
 export function MovimientosPage() {
@@ -151,7 +171,8 @@ export function MovimientosPage() {
     comprobante: '',
     observaciones: '',
     fecha: new Date().toISOString().split('T')[0],
-    items: [{ herramientaId: '', cantidad: '', costoUnitario: '' }]
+    // Agregamos estado al item, por defecto BUENO
+    items: [{ herramientaId: '', cantidad: '', costoUnitario: '', estado: 'BUENO' }]
   })
 
   // Dialog anular
@@ -163,18 +184,18 @@ export function MovimientosPage() {
   const [dialogEditarOpen, setDialogEditarOpen] = useState(false)
   const [movimientoEditar, setMovimientoEditar] = useState<Record<string, unknown> | null>(null)
   const [editarData, setEditarData] = useState<{
-  fecha: string
-  proveedor: string
-  comprobante: string
-  observaciones: string
-  items?: { herramientaId: string; cantidad: string; costoUnitario: string; serial?: string }[]
-}>({
-  fecha: '',
-  proveedor: '',
-  comprobante: '',
-  observaciones: '',
-  items: []
-})
+    fecha: string
+    proveedor: string
+    comprobante: string
+    observaciones: string
+    items?: { herramientaId: string; cantidad: string; costoUnitario: string; estado: string; serial?: string }[]
+  }>({
+    fecha: '',
+    proveedor: '',
+    comprobante: '',
+    observaciones: '',
+    items: []
+  })
 
   // Dialog eliminar
   const [dialogEliminarOpen, setDialogEliminarOpen] = useState(false)
@@ -244,7 +265,7 @@ export function MovimientosPage() {
       comprobante: '',
       observaciones: '',
       fecha: new Date().toISOString().split('T')[0],
-      items: [{ herramientaId: '', cantidad: '', costoUnitario: '' }]
+      items: [{ herramientaId: '', cantidad: '', costoUnitario: '', estado: 'BUENO' }]
     })
   }
 
@@ -278,13 +299,15 @@ export function MovimientosPage() {
     }
   }
 
+  // Agregar item con estado por defecto BUENO
   const addItem = () => {
     setFormData({
       ...formData,
-      items: [...formData.items, { herramientaId: '', cantidad: '', costoUnitario: '' }]
+      items: [...formData.items, { herramientaId: '', cantidad: '', costoUnitario: '', estado: 'BUENO' }]
     })
   }
 
+  // Actualizar item incluyendo el campo estado
   const updateItem = (index: number, field: string, value: string) => {
     const newItems = [...formData.items]
     newItems[index] = { ...newItems[index], [field]: value }
@@ -303,21 +326,22 @@ export function MovimientosPage() {
   }
 
   const openEditar = (mov: Record<string, unknown>) => {
-  setMovimientoEditar(mov)
-  setEditarData({
-    fecha: new Date(mov.fecha as string).toISOString().split('T')[0],
-    proveedor: (mov.proveedor as string) || '',
-    comprobante: (mov.comprobante as string) || '',
-    observaciones: (mov.observaciones as string) || '',
-    items: ((mov.items as Record<string, unknown>[]) || []).map((item: Record<string, unknown>) => ({
-      herramientaId: item.herramientaId as string,
-      cantidad: (item.cantidad as number).toString(),
-      costoUnitario: (item.costoUnitario as number).toString(),
-      serial: (item.serial as string) || ''
-    }))
-  })
-  setDialogEditarOpen(true)
-}
+    setMovimientoEditar(mov)
+    setEditarData({
+      fecha: new Date(mov.fecha as string).toISOString().split('T')[0],
+      proveedor: (mov.proveedor as string) || '',
+      comprobante: (mov.comprobante as string) || '',
+      observaciones: (mov.observaciones as string) || '',
+      items: ((mov.items as Record<string, unknown>[]) || []).map((item: Record<string, unknown>) => ({
+        herramientaId: item.herramientaId as string,
+        cantidad: (item.cantidad as number).toString(),
+        costoUnitario: (item.costoUnitario as number).toString(),
+        estado: (item.estado as string) || 'BUENO',
+        serial: (item.serial as string) || ''
+      }))
+    })
+    setDialogEditarOpen(true)
+  }
 
   const openAnular = (mov: Record<string, unknown>) => {
     setMovimientoAnular(mov)
@@ -413,6 +437,10 @@ export function MovimientosPage() {
                     const montoTotal = items.reduce((sum, i) => sum + ((i.costoTotal as number) || 0), 0)
                     const tipoInfo = tipoLabels[m.tipo as string]
                     const esAnulado = m.anulado as boolean
+                    const sedeOrigen = m.sedeOrigen as Record<string, unknown> | undefined
+                    const sedeDestino = m.sedeDestino as Record<string, unknown> | undefined
+                    const tecnico = m.tecnico as Record<string, unknown> | undefined
+                    const anuladoPor = m.anuladoPor as Record<string, unknown> | undefined
                     
                     return (
                       <TableRow key={m.id as string} className={esAnulado ? 'bg-red-50 opacity-70' : ''}>
@@ -428,18 +456,18 @@ export function MovimientosPage() {
                         <TableCell>
                           <Badge className={tipoInfo?.color || ''}>
                             {tipoInfo?.icon}
-                            <span className="ml-1">{tipoInfo?.label || m.tipo}</span>
+                            <span className="ml-1">{tipoInfo?.label || m.tipo as string}</span>
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {(m.sedeOrigen as Record<string, unknown>)?.nombre && (
-                            <span className="text-muted-foreground">{(m.sedeOrigen as Record<string, unknown>).nombre as string} → </span>
+                          {sedeOrigen?.nombre && (
+                            <span className="text-muted-foreground">{sedeOrigen.nombre as string} → </span>
                           )}
-                          {(m.sedeDestino as Record<string, unknown>)?.nombre as string}
+                          {sedeDestino?.nombre as string}
                         </TableCell>
                         <TableCell>
-                          {(m.tecnico as Record<string, unknown>)?.nombre ? 
-                            `${(m.tecnico as Record<string, unknown>).nombre as string} ${(m.tecnico as Record<string, unknown>).apellido as string}` : '-'}
+                          {tecnico?.nombre ? 
+                            `${tecnico.nombre as string} ${tecnico.apellido as string}` : '-'}
                         </TableCell>
                         <TableCell className="text-right">{items.length}</TableCell>
                         <TableCell className="text-right font-medium">
@@ -450,7 +478,7 @@ export function MovimientosPage() {
                             <div className="text-xs text-red-600">
                               <p>Anulado: {m.motivoAnulacion ? (m.motivoAnulacion as string).substring(0, 20) + '...' : '-'}</p>
                               <p className="text-muted-foreground">
-                                Por: {(m.anuladoPor as Record<string, unknown>)?.name as string}
+                                Por: {anuladoPor?.name as string}
                               </p>
                             </div>
                           ) : (
@@ -696,7 +724,7 @@ export function MovimientosPage() {
               />
             </div>
 
-            {/* Items */}
+            {/* Items - LAYOUT EN 2 FILAS */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Items del Movimiento</Label>
@@ -705,35 +733,85 @@ export function MovimientosPage() {
                   Agregar Item
                 </Button>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {formData.items.map((item, index) => (
-                  <div key={index} className="grid grid-cols-3 gap-2 p-3 bg-slate-50 rounded-lg">
-                    <Select value={item.herramientaId} onValueChange={(v) => updateItem(index, 'herramientaId', v)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Herramienta..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {herramientas?.filter((h: Record<string, unknown>) => h.activo).map((h: Record<string, unknown>) => (
-                          <SelectItem key={h.id as string} value={h.id as string}>
-                            {h.codigo as string} - {h.nombre as string}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      type="number"
-                      placeholder="Cantidad"
-                      value={item.cantidad}
-                      onChange={(e) => updateItem(index, 'cantidad', e.target.value)}
-                    />
-                    <Input
-                      type="number"
-                      step="0.01"
-                      placeholder="Costo Unit."
-                      value={item.costoUnitario}
-                      onChange={(e) => updateItem(index, 'costoUnitario', e.target.value)}
-                      disabled={movimientoTipo !== 'COMPRA'}
-                    />
+                  <div key={index} className="p-3 bg-slate-50 rounded-lg border space-y-2">
+                    {/* Fila 1: Selector de Herramienta */}
+                    <div className="w-full">
+                      <Label className="text-xs text-muted-foreground">Herramienta</Label>
+                      <Select value={item.herramientaId} onValueChange={(v) => updateItem(index, 'herramientaId', v)}>
+                        <SelectTrigger className="w-full overflow-hidden">
+                          <SelectValue placeholder="Seleccionar herramienta...">
+                            {item.herramientaId && (
+                              <span className="truncate block">
+                                {getHerramientaDisplay(item.herramientaId, herramientas as Record<string, unknown>[] | undefined)}
+                              </span>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {herramientas?.filter((h: Record<string, unknown>) => h.activo).map((h: Record<string, unknown>) => (
+                            <SelectItem key={h.id as string} value={h.id as string}>
+                              {h.codigo as string} - {h.nombre as string}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Fila 2: Cantidad, Estado, Costo */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Cantidad</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          placeholder="Cant."
+                          value={item.cantidad}
+                          onChange={(e) => updateItem(index, 'cantidad', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Estado</Label>
+                        <Select value={item.estado} onValueChange={(v) => updateItem(index, 'estado', v)}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="BUENO">Bueno</SelectItem>
+                            <SelectItem value="USADO">Usado</SelectItem>
+                            <SelectItem value="REPARADO">Reparado</SelectItem>
+                            <SelectItem value="DAÑADO">Dañado</SelectItem>
+                            <SelectItem value="EN_MANTENIMIENTO">Mantenimiento</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Costo Unit.</Label>
+                        <div className="flex gap-1">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="S/."
+                            value={item.costoUnitario}
+                            onChange={(e) => updateItem(index, 'costoUnitario', e.target.value)}
+                            disabled={movimientoTipo !== 'COMPRA'}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0 text-red-600 hover:text-red-700"
+                            onClick={() => {
+                              const newItems = formData.items.filter((_, i) => i !== index)
+                              setFormData({ ...formData, items: newItems.length > 0 ? newItems : [{ herramientaId: '', cantidad: '', costoUnitario: '', estado: 'BUENO' }] })
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -799,168 +877,207 @@ export function MovimientosPage() {
       </Dialog>
 
       {/* Dialog para editar */}
-      {/* Dialog para editar */}
-<Dialog open={dialogEditarOpen} onOpenChange={setDialogEditarOpen}>
-  <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-    <DialogHeader>
-      <DialogTitle className="flex items-center gap-2">
-        <Pencil className="w-5 h-5" />
-        Editar Movimiento
-      </DialogTitle>
-    </DialogHeader>
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Movimiento: <strong>{movimientoEditar?.numero as string}</strong> - 
-        Tipo: <strong>{tipoLabels[movimientoEditar?.tipo as string]?.label}</strong>
-      </p>
-      
-      <div className="space-y-2">
-        <Label>Fecha</Label>
-        <Input
-          type="date"
-          value={editarData.fecha}
-          onChange={(e) => setEditarData({ ...editarData, fecha: e.target.value })}
-          max={getMaxFecha()}
-          min={getMinFecha()}
-        />
-      </div>
-      
-      {movimientoEditar?.tipo === 'COMPRA' && (
-        <div className="space-y-2">
-          <Label>Proveedor</Label>
-          <Input
-            value={editarData.proveedor}
-            onChange={(e) => setEditarData({ ...editarData, proveedor: e.target.value })}
-          />
-        </div>
-      )}
-      
-      <div className="space-y-2">
-        <Label>Comprobante</Label>
-        <Input
-          value={editarData.comprobante}
-          onChange={(e) => setEditarData({ ...editarData, comprobante: e.target.value })}
-        />
-      </div>
-      
-      <div className="space-y-2">
-        <Label>Observaciones</Label>
-        <Textarea
-          value={editarData.observaciones}
-          onChange={(e) => setEditarData({ ...editarData, observaciones: e.target.value })}
-        />
-      </div>
+      <Dialog open={dialogEditarOpen} onOpenChange={setDialogEditarOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-5 h-5" />
+              Editar Movimiento
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Movimiento: <strong>{movimientoEditar?.numero as string}</strong> - 
+              Tipo: <strong>{tipoLabels[movimientoEditar?.tipo as string]?.label}</strong>
+            </p>
+            
+            <div className="space-y-2">
+              <Label>Fecha</Label>
+              <Input
+                type="date"
+                value={editarData.fecha}
+                onChange={(e) => setEditarData({ ...editarData, fecha: e.target.value })}
+                max={getMaxFecha()}
+                min={getMinFecha()}
+              />
+            </div>
+            
+            {movimientoEditar?.tipo === 'COMPRA' && (
+              <div className="space-y-2">
+                <Label>Proveedor</Label>
+                <Input
+                  value={editarData.proveedor}
+                  onChange={(e) => setEditarData({ ...editarData, proveedor: e.target.value })}
+                />
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <Label>Comprobante</Label>
+              <Input
+                value={editarData.comprobante}
+                onChange={(e) => setEditarData({ ...editarData, comprobante: e.target.value })}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Observaciones</Label>
+              <Textarea
+                value={editarData.observaciones}
+                onChange={(e) => setEditarData({ ...editarData, observaciones: e.target.value })}
+              />
+            </div>
 
-      {/* Items editables */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label>Items del Movimiento</Label>
-          <Button 
-            type="button" 
-            variant="outline" 
-            size="sm" 
-            onClick={() => setEditarData({ 
-              ...editarData, 
-              items: [...(editarData.items || []), { herramientaId: '', cantidad: '', costoUnitario: '' }]
-            })}
-          >
-            <Plus className="w-4 h-4 mr-1" />
-            Agregar Item
-          </Button>
-        </div>
-        <div className="space-y-2">
-          {(editarData.items || [])?.map((item, index) => (
-            <div key={index} className="grid grid-cols-12 gap-2 p-3 bg-slate-50 rounded-lg items-center">
-              <div className="col-span-5">
-                <Select 
-                  value={item.herramientaId} 
-                  onValueChange={(v) => {
-                    const newItems = [...(editarData.items || [])]
-                    newItems[index] = { ...newItems[index], herramientaId: v }
-                    setEditarData({ ...editarData, items: newItems })
-                  }}
+            {/* Items editables - LAYOUT EN 2 FILAS */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Items del Movimiento</Label>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setEditarData({ 
+                    ...editarData, 
+                    items: [...(editarData.items || []), { herramientaId: '', cantidad: '', costoUnitario: '', estado: 'BUENO' }]
+                  })}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Herramienta..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {herramientas?.filter((h: Record<string, unknown>) => h.activo).map((h: Record<string, unknown>) => (
-                      <SelectItem key={h.id as string} value={h.id as string}>
-                        {h.codigo as string} - {h.nombre as string}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-3">
-                <Input
-                  type="number"
-                  placeholder="Cantidad"
-                  value={item.cantidad}
-                  onChange={(e) => {
-                    const newItems = [...(editarData.items || [])]
-                    newItems[index] = { ...newItems[index], cantidad: e.target.value }
-                    setEditarData({ ...editarData, items: newItems })
-                  }}
-                />
-              </div>
-              <div className="col-span-3">
-                <Input
-                  type="number"
-                  step="0.01"
-                  placeholder="Costo Unit."
-                  value={item.costoUnitario}
-                  onChange={(e) => {
-                    const newItems = [...(editarData.items || [])]
-                    newItems[index] = { ...newItems[index], costoUnitario: e.target.value }
-                    setEditarData({ ...editarData, items: newItems })
-                  }}
-                  disabled={movimientoEditar?.tipo !== 'COMPRA'}
-                />
-              </div>
-              <div className="col-span-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600 hover:text-red-700"
-                  onClick={() => {
-                    const newItems = (editarData.items || []).filter((_, i) => i !== index)
-                    setEditarData({ ...editarData, items: newItems })
-                  }}
-                >
-                  <Trash2 className="w-4 h-4" />
+                  <Plus className="w-4 h-4 mr-1" />
+                  Agregar Item
                 </Button>
               </div>
+              <div className="space-y-3">
+                {(editarData.items || [])?.map((item, index) => (
+                  <div key={index} className="p-3 bg-slate-50 rounded-lg border space-y-2">
+                    {/* Fila 1: Selector de Herramienta */}
+                    <div className="w-full">
+                      <Label className="text-xs text-muted-foreground">Herramienta</Label>
+                      <Select 
+                        value={item.herramientaId} 
+                        onValueChange={(v) => {
+                          const newItems = [...(editarData.items || [])]
+                          newItems[index] = { ...newItems[index], herramientaId: v }
+                          setEditarData({ ...editarData, items: newItems })
+                        }}
+                      >
+                        <SelectTrigger className="w-full overflow-hidden">
+                          <SelectValue placeholder="Seleccionar herramienta...">
+                            {item.herramientaId && (
+                              <span className="truncate block">
+                                {getHerramientaDisplay(item.herramientaId, herramientas as Record<string, unknown>[] | undefined)}
+                              </span>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {herramientas?.filter((h: Record<string, unknown>) => h.activo).map((h: Record<string, unknown>) => (
+                            <SelectItem key={h.id as string} value={h.id as string}>
+                              {h.codigo as string} - {h.nombre as string}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* Fila 2: Cantidad, Estado, Costo */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Cantidad</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          placeholder="Cant."
+                          value={item.cantidad}
+                          onChange={(e) => {
+                            const newItems = [...(editarData.items || [])]
+                            newItems[index] = { ...newItems[index], cantidad: e.target.value }
+                            setEditarData({ ...editarData, items: newItems })
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Estado</Label>
+                        <Select 
+                          value={item.estado || 'BUENO'} 
+                          onValueChange={(v) => {
+                            const newItems = [...(editarData.items || [])]
+                            newItems[index] = { ...newItems[index], estado: v }
+                            setEditarData({ ...editarData, items: newItems })
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="BUENO">Bueno</SelectItem>
+                            <SelectItem value="USADO">Usado</SelectItem>
+                            <SelectItem value="REPARADO">Reparado</SelectItem>
+                            <SelectItem value="DAÑADO">Dañado</SelectItem>
+                            <SelectItem value="EN_MANTENIMIENTO">Mantenimiento</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Costo Unit.</Label>
+                        <div className="flex gap-1">
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="S/."
+                            value={item.costoUnitario}
+                            onChange={(e) => {
+                              const newItems = [...(editarData.items || [])]
+                              newItems[index] = { ...newItems[index], costoUnitario: e.target.value }
+                              setEditarData({ ...editarData, items: newItems })
+                            }}
+                            disabled={movimientoEditar?.tipo !== 'COMPRA'}
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0 text-red-600 hover:text-red-700"
+                            onClick={() => {
+                              const newItems = (editarData.items || []).filter((_, i) => i !== index)
+                              setEditarData({ 
+                                ...editarData, 
+                                items: newItems.length > 0 ? newItems : [{ herramientaId: '', cantidad: '', costoUnitario: '', estado: 'BUENO' }] 
+                              })
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
-        </div>
-      </div>
-    </div>
-    <DialogFooter>
-      <Button variant="outline" onClick={() => setDialogEditarOpen(false)}>
-        Cancelar
-      </Button>
-      <Button 
-        className="bg-orange-500 hover:bg-orange-600"
-        onClick={() => {
-          if (movimientoEditar) {
-            editarMutation.mutate({ 
-              id: movimientoEditar.id as string, 
-              data: {
-                ...editarData,
-                items: editarData.items?.filter(i => i.herramientaId && i.cantidad)
-              }
-            })
-          }
-        }}
-        disabled={editarMutation.isPending}
-      >
-        {editarMutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogEditarOpen(false)}>
+              Cancelar
+            </Button>
+            <Button 
+              className="bg-orange-500 hover:bg-orange-600"
+              onClick={() => {
+                if (movimientoEditar) {
+                  editarMutation.mutate({ 
+                    id: movimientoEditar.id as string, 
+                    data: {
+                      ...editarData,
+                      items: editarData.items?.filter(i => i.herramientaId && i.cantidad)
+                    }
+                  })
+                }
+              }}
+              disabled={editarMutation.isPending}
+            >
+              {editarMutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog para eliminar */}
       <Dialog open={dialogEliminarOpen} onOpenChange={setDialogEliminarOpen}>

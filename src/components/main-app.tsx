@@ -12,6 +12,8 @@ import { MovimientosPage } from '@/components/modules/movimientos-page'
 import { KardexPage } from '@/components/modules/kardex-page'
 import { ConsultaPage } from '@/components/modules/consulta-page'
 import { ReportesPage } from '@/components/modules/reportes-page'
+import { ReporteSedePage } from '@/components/modules/reporte-sede-page'
+import { UsuariosPage } from '@/components/modules/usuarios-page'
 
 export function MainApp() {
   const { data: session, status } = useSession()
@@ -52,8 +54,11 @@ export function MainApp() {
         return <ConsultaPage />
       case 'reportes':
         return <ReportesPage />
+      // En el switch agregar:
+      case 'reporte-sede':
+        return <ReporteSedePage />
       case 'usuarios':
-        return <div className="p-6"><h1 className="text-2xl font-bold">Usuarios</h1><p className="text-muted-foreground">Módulo en desarrollo...</p></div>
+        return <UsuariosPage />
       default:
         return <DashboardPage />
     }

@@ -1,6 +1,7 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from './auth'
 import { db } from './db'
+import { PrismaClient } from '@prisma/client'
 
 // Obtener la sesión actual del usuario
 export async function getCurrentUser() {
@@ -72,6 +73,39 @@ export async function generateMovimientoNumero(tipo: string) {
   return `${prefix}-${year}-${nextNumber.toString().padStart(6, '0')}`
 }
 
+// Generar números para transferencia (SALIDA + INGRESO)
+export async function generateMovimientoNumeroTransferencia(tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'> = db) {
+  const year = new Date().getFullYear()
+  
+  // Buscar el último número de transferencia
+  const lastTransferencia = await tx.movimiento.findFirst({
+    where: {
+      OR: [
+        { numero: { startsWith: `TRA-${year}-` } },
+        { numero: { contains: `-S-` } },
+        { numero: { contains: `-I-` } }
+      ]
+    },
+    orderBy: { numero: 'desc' }
+  })
+  
+  let nextNumber = 1
+  if (lastTransferencia) {
+    // Extraer el número base (sin el sufijo -S o -I)
+    const match = lastTransferencia.numero.match(/TRA-\d{4}-(\d+)/)
+    if (match) {
+      nextNumber = parseInt(match[1]) + 1
+    }
+  }
+  
+  const baseNumber = nextNumber.toString().padStart(6, '0')
+  
+  return {
+    salida: `TRA-${year}-${baseNumber}-S`,   // Salida de sede origen
+    ingreso: `TRA-${year}-${baseNumber}-I`   // Ingreso a sede destino
+  }
+}
+
 // Calcular costo promedio ponderado
 export function calculateCostoPromedio(
   stockActual: number,
@@ -91,3 +125,4 @@ export function calculateCostoPromedio(
   
   return (valorActual + valorIngreso) / nuevoStock
 }
+
