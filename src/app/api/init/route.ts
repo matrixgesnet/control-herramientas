@@ -1,9 +1,15 @@
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
 
 // POST - Inicializar datos por defecto
 export async function POST() {
   try {
+    // Hashear contraseñas
+    const hashedAdminPassword = await bcrypt.hash('admin123', 10)
+    const hashedSupervisorPassword = await bcrypt.hash('super123', 10)
+    const hashedWarehousePassword = await bcrypt.hash('almacen123', 10)
+
     // Crear usuario admin si no existe
     const existingAdmin = await db.user.findUnique({ where: { email: 'admin@test.com' } })
     
@@ -12,7 +18,7 @@ export async function POST() {
         data: {
           email: 'admin@test.com',
           name: 'Administrador',
-          password: 'admin123',
+          password: hashedAdminPassword,
           role: 'admin',
           active: true
         }
@@ -27,7 +33,7 @@ export async function POST() {
         data: {
           email: 'supervisor@test.com',
           name: 'Supervisor',
-          password: 'super123',
+          password: hashedSupervisorPassword,
           role: 'supervisor',
           active: true
         }
@@ -70,7 +76,7 @@ export async function POST() {
         data: {
           email: 'almacen@test.com',
           name: 'Encargado de Almacén',
-          password: 'almacen123',
+          password: hashedWarehousePassword,
           role: 'warehouse',
           sedeId: sede.id,
           active: true

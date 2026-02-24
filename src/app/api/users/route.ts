@@ -1,6 +1,7 @@
 import { db } from '@/lib/db'
 import { hasRole } from '@/lib/utils-server'
 import { NextResponse } from 'next/server'
+import bcrypt from 'bcryptjs'
 
 // GET - Listar usuarios
 export async function GET() {
@@ -49,11 +50,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Ya existe un usuario con ese email' }, { status: 400 })
     }
 
+    // Hashear contraseña con bcrypt
+    const hashedPassword = await bcrypt.hash(password, 10)
+
     const user = await db.user.create({
       data: {
         email,
         name,
-        password, // En producción usar bcrypt
+        password: hashedPassword,
         role,
         sedeId: role === 'warehouse' ? sedeId : null
       },
@@ -82,18 +86,26 @@ export async function PUT(request: Request) {
     }
 
     const body = await request.json()
-    const { id, ...data } = body
+    const { id, password, ...data } = body
 
     if (!id) {
       return NextResponse.json({ error: 'ID es requerido' }, { status: 400 })
     }
 
+    // Construir objeto de actualización
+    const updateData: Record<string, unknown> = {
+      ...data,
+      sedeId: data.role === 'warehouse' ? data.sedeId : null
+    }
+
+    // Si se proporciona una nueva contraseña, hashearla
+    if (password && password.trim() !== '') {
+      updateData.password = await bcrypt.hash(password, 10)
+    }
+
     const user = await db.user.update({
       where: { id },
-      data: {
-        ...data,
-        sedeId: data.role === 'warehouse' ? data.sedeId : null
-      },
+      data: updateData,
       select: {
         id: true,
         email: true,

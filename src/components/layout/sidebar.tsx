@@ -67,6 +67,8 @@ interface SidebarContentProps {
 }
 
 function SidebarContent({ collapsed, currentPage, userRole, userName, onPageChange, onMobileClose }: SidebarContentProps) {
+  console.log('userRole:', userRole, 'tipo:', typeof userRole) // AGREGA ESTA LÍNEA
+  
   const filteredItems = menuItems.filter(item => {
     if (!item.roles) return true
     return item.roles.includes(userRole || '')
