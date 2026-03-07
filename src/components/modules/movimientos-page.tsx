@@ -36,6 +36,7 @@ import {
   Plus, Search, ShoppingCart, ArrowRightLeft, UserMinus, RotateCcw, Trash2, 
   AlertTriangle, Pencil, XCircle, Eye, EyeOff
 } from 'lucide-react'
+import { HerramientaCombobox } from '@/components/ui/herramienta-combobox'
 
 async function fetchMovimientos(incluirAnulados: boolean) {
   const params = new URLSearchParams()
@@ -736,27 +737,27 @@ export function MovimientosPage() {
               <div className="space-y-3">
                 {formData.items.map((item, index) => (
                   <div key={index} className="p-3 bg-slate-50 rounded-lg border space-y-2">
-                    {/* Fila 1: Selector de Herramienta */}
+                    {/* Fila 1: Selector de Herramienta con búsqueda */}
                     <div className="w-full">
                       <Label className="text-xs text-muted-foreground">Herramienta</Label>
-                      <Select value={item.herramientaId} onValueChange={(v) => updateItem(index, 'herramientaId', v)}>
-                        <SelectTrigger className="w-full overflow-hidden">
-                          <SelectValue placeholder="Seleccionar herramienta...">
-                            {item.herramientaId && (
-                              <span className="truncate block">
-                                {getHerramientaDisplay(item.herramientaId, herramientas as Record<string, unknown>[] | undefined)}
-                              </span>
-                            )}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {herramientas?.filter((h: Record<string, unknown>) => h.activo).map((h: Record<string, unknown>) => (
-                            <SelectItem key={h.id as string} value={h.id as string}>
-                              {h.codigo as string} - {h.nombre as string}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <HerramientaCombobox
+                        herramientas={(herramientas as { id: string; codigo: string; nombre: string; activo: boolean }[]) || []}
+                        value={item.herramientaId}
+                        onChange={(v) => updateItem(index, 'herramientaId', v)}
+                        placeholder="Buscar herramienta..."
+                      />
+									 
+							  
+										
+										
+									   
+																															   
+																					
+																		 
+										 
+							 
+										
+							   
                     </div>
                     
                     {/* Fila 2: Cantidad, Estado, Costo */}
@@ -948,34 +949,35 @@ export function MovimientosPage() {
               <div className="space-y-3">
                 {(editarData.items || [])?.map((item, index) => (
                   <div key={index} className="p-3 bg-slate-50 rounded-lg border space-y-2">
-                    {/* Fila 1: Selector de Herramienta */}
+                    {/* Fila 1: Selector de Herramienta con búsqueda */}
                     <div className="w-full">
                       <Label className="text-xs text-muted-foreground">Herramienta</Label>
-                      <Select 
-                        value={item.herramientaId} 
-                        onValueChange={(v) => {
+                      <HerramientaCombobox
+                        herramientas={(herramientas as { id: string; codigo: string; nombre: string; activo: boolean }[]) || []}
+                        value={item.herramientaId}
+                        onChange={(v) => {
                           const newItems = [...(editarData.items || [])]
                           newItems[index] = { ...newItems[index], herramientaId: v }
                           setEditarData({ ...editarData, items: newItems })
                         }}
-                      >
-                        <SelectTrigger className="w-full overflow-hidden">
-                          <SelectValue placeholder="Seleccionar herramienta...">
-                            {item.herramientaId && (
-                              <span className="truncate block">
-                                {getHerramientaDisplay(item.herramientaId, herramientas as Record<string, unknown>[] | undefined)}
-                              </span>
-                            )}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {herramientas?.filter((h: Record<string, unknown>) => h.activo).map((h: Record<string, unknown>) => (
-                            <SelectItem key={h.id as string} value={h.id as string}>
-                              {h.codigo as string} - {h.nombre as string}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+					   
+																		  
+                        placeholder="Buscar herramienta..."
+                      />
+															   
+																																  
+									 
+							  
+										
+										
+									   
+																															   
+																					
+																		 
+										 
+							 
+										
+							   
                     </div>
                     
                     {/* Fila 2: Cantidad, Estado, Costo */}
