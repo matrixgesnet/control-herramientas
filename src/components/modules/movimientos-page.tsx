@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
@@ -34,7 +34,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { 
   Plus, Search, ShoppingCart, ArrowRightLeft, UserMinus, RotateCcw, Trash2, 
-  AlertTriangle, Pencil, XCircle, Eye, EyeOff
+  AlertTriangle, Pencil, XCircle, Eye, EyeOff, ChevronLeft, ChevronRight, FileText
 } from 'lucide-react'
 import { HerramientaCombobox } from '@/components/ui/herramienta-combobox'
 
@@ -160,6 +160,15 @@ export function MovimientosPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [incluirAnulados, setIncluirAnulados] = useState(false)
+  
+  // Estados para filtros
+  const [filtroFechaDesde, setFiltroFechaDesde] = useState('')
+  const [filtroFechaHasta, setFiltroFechaHasta] = useState('')
+  const [filtroTipo, setFiltroTipo] = useState<string>('todos')
+  
+  // Estados para paginación
+  const [paginaActual, setPaginaActual] = useState(1)
+  const [itemsPorPagina, setItemsPorPagina] = useState(10)
   
   // Dialog crear/editar
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -315,10 +324,45 @@ export function MovimientosPage() {
     setFormData({ ...formData, items: newItems })
   }
 
-  const filtered = movimientos?.filter((m: Record<string, unknown>) =>
-    (m.numero as string)?.toLowerCase().includes(search.toLowerCase()) ||
-    (m.tipo as string)?.toLowerCase().includes(search.toLowerCase())
-  )
+  // Filtrado con useMemo
+  const filtered = useMemo(() => {
+    if (!movimientos) return []
+    
+    return movimientos.filter((m: Record<string, unknown>) => {
+      // Filtro por búsqueda
+      const matchSearch = (m.numero as string)?.toLowerCase().includes(search.toLowerCase()) ||
+        (m.tipo as string)?.toLowerCase().includes(search.toLowerCase())
+      
+      // Filtro por tipo (incluye TRANSFERENCIA_SALIDA y TRANSFERENCIA_INGRESO cuando se selecciona TRANSFERENCIA)
+      const matchTipo = filtroTipo === 'todos' || 
+        m.tipo === filtroTipo ||
+        (filtroTipo === 'TRANSFERENCIA' && (m.tipo === 'TRANSFERENCIA_SALIDA' || m.tipo === 'TRANSFERENCIA_INGRESO'))
+      
+      // Filtro por fecha desde
+      const fechaMov = new Date(m.fecha as string)
+      const matchFechaDesde = !filtroFechaDesde || fechaMov >= new Date(filtroFechaDesde)
+      
+      // Filtro por fecha hasta
+      const matchFechaHasta = !filtroFechaHasta || fechaMov <= new Date(filtroFechaHasta + 'T23:59:59')
+      
+      return matchSearch && matchTipo && matchFechaDesde && matchFechaHasta
+    })
+  }, [movimientos, search, filtroTipo, filtroFechaDesde, filtroFechaHasta])
+  
+  // Paginación
+  const totalPaginas = Math.ceil((filtered?.length || 0) / itemsPorPagina)
+  const indiceInicio = (paginaActual - 1) * itemsPorPagina
+  const indiceFin = indiceInicio + itemsPorPagina
+  const movimientosPagina = filtered?.slice(indiceInicio, indiceFin)
+  
+  // Resetear página cuando cambian los filtros
+  const limpiarFiltros = () => {
+    setFiltroFechaDesde('')
+    setFiltroFechaHasta('')
+    setFiltroTipo('todos')
+    setSearch('')
+    setPaginaActual(1)
+  }
 
   const openNewMovimiento = (tipo: string) => {
     setMovimientoTipo(tipo)
@@ -390,26 +434,73 @@ export function MovimientosPage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar movimiento..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10"
-              />
+          {/* Filtros */}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Label className="text-xs whitespace-nowrap">Desde:</Label>
+                <Input
+                  type="date"
+                  value={filtroFechaDesde}
+                  onChange={(e) => { setFiltroFechaDesde(e.target.value); setPaginaActual(1) }}
+                  className="w-36 h-8 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs whitespace-nowrap">Hasta:</Label>
+                <Input
+                  type="date"
+                  value={filtroFechaHasta}
+                  onChange={(e) => { setFiltroFechaHasta(e.target.value); setPaginaActual(1) }}
+                  className="w-36 h-8 text-sm"
+                />
+              </div>
+              <Select value={filtroTipo} onValueChange={(v) => { setFiltroTipo(v); setPaginaActual(1) }}>
+                <SelectTrigger className="w-40 h-8 text-sm">
+                  <SelectValue placeholder="Tipo..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  <SelectItem value="COMPRA">Compra</SelectItem>
+                  <SelectItem value="TRANSFERENCIA">Transferencia (todas)</SelectItem>
+                  <SelectItem value="TRANSFERENCIA_SALIDA">Transf. Salida</SelectItem>
+                  <SelectItem value="TRANSFERENCIA_INGRESO">Transf. Ingreso</SelectItem>
+                  <SelectItem value="SALIDA">Salida a Técnico</SelectItem>
+                  <SelectItem value="DEVOLUCION_TECNICO">Devolución</SelectItem>
+                  <SelectItem value="BAJA">Baja</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={limpiarFiltros}
+                className="h-8 text-xs"
+              >
+                Limpiar
+              </Button>
             </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="incluirAnulados"
-                checked={incluirAnulados}
-                onCheckedChange={(checked) => setIncluirAnulados(checked as boolean)}
-              />
-              <label htmlFor="incluirAnulados" className="text-sm flex items-center gap-1 cursor-pointer">
-                {incluirAnulados ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                Ver anulados
-              </label>
+            {/* Búsqueda y ver anulados */}
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por número..."
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setPaginaActual(1) }}
+                  className="pl-10 h-8 text-sm"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="incluirAnulados"
+                  checked={incluirAnulados}
+                  onCheckedChange={(checked) => setIncluirAnulados(checked as boolean)}
+                />
+                <label htmlFor="incluirAnulados" className="text-sm flex items-center gap-1 cursor-pointer">
+                  {incluirAnulados ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  Ver anulados
+                </label>
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -426,6 +517,7 @@ export function MovimientosPage() {
                     <TableHead>Tipo</TableHead>
                     <TableHead>Origen/Destino</TableHead>
                     <TableHead>Técnico</TableHead>
+                    <TableHead>Comprobante</TableHead>
                     <TableHead className="text-right">Items</TableHead>
                     <TableHead className="text-right">Monto Total</TableHead>
                     <TableHead>Estado</TableHead>
@@ -433,7 +525,7 @@ export function MovimientosPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered?.map((m: Record<string, unknown>) => {
+                  {movimientosPagina?.map((m: Record<string, unknown>) => {
                     const items = (m.items as Record<string, unknown>[]) || []
                     const montoTotal = items.reduce((sum, i) => sum + ((i.costoTotal as number) || 0), 0)
                     const tipoInfo = tipoLabels[m.tipo as string]
@@ -469,6 +561,12 @@ export function MovimientosPage() {
                         <TableCell>
                           {tecnico?.nombre ? 
                             `${tecnico.nombre as string} ${tecnico.apellido as string}` : '-'}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          <div className="flex items-center gap-1">
+                            <FileText className="w-3 h-3 text-muted-foreground" />
+                            {m.comprobante ? (m.comprobante as string) : <span className="text-muted-foreground">-</span>}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">{items.length}</TableCell>
                         <TableCell className="text-right font-medium">
@@ -525,15 +623,84 @@ export function MovimientosPage() {
                       </TableRow>
                     )
                   })}
-                  {filtered?.length === 0 && (
+                  {movimientosPagina?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                         No se encontraron movimientos
                       </TableCell>
                     </TableRow>
                   )}
                 </TableBody>
               </Table>
+            </div>
+          )}
+          
+          {/* Controles de paginación */}
+          {(filtered?.length || 0) > 0 && (
+            <div className="flex items-center justify-between border-t pt-4 mt-4">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <span>Mostrando</span>
+                <Select value={itemsPorPagina.toString()} onValueChange={(v) => { setItemsPorPagina(Number(v)); setPaginaActual(1) }}>
+                  <SelectTrigger className="w-16 h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="20">20</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span>de {filtered?.length || 0} registros</span>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPaginaActual(paginaActual - 1)}
+                  disabled={paginaActual === 1}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                  Anterior
+                </Button>
+                
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: Math.min(5, totalPaginas) }, (_, i) => {
+                    let pageNum: number
+                    if (totalPaginas <= 5) {
+                      pageNum = i + 1
+                    } else if (paginaActual <= 3) {
+                      pageNum = i + 1
+                    } else if (paginaActual >= totalPaginas - 2) {
+                      pageNum = totalPaginas - 4 + i
+                    } else {
+                      pageNum = paginaActual - 2 + i
+                    }
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={paginaActual === pageNum ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => setPaginaActual(pageNum)}
+                        className={paginaActual === pageNum ? "bg-orange-500 hover:bg-orange-600" : ""}
+                      >
+                        {pageNum}
+                      </Button>
+                    )
+                  })}
+                </div>
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPaginaActual(paginaActual + 1)}
+                  disabled={paginaActual === totalPaginas || totalPaginas === 0}
+                >
+                  Siguiente
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
@@ -746,18 +913,6 @@ export function MovimientosPage() {
                         onChange={(v) => updateItem(index, 'herramientaId', v)}
                         placeholder="Buscar herramienta..."
                       />
-									 
-							  
-										
-										
-									   
-																															   
-																					
-																		 
-										 
-							 
-										
-							   
                     </div>
                     
                     {/* Fila 2: Cantidad, Estado, Costo */}
@@ -960,24 +1115,8 @@ export function MovimientosPage() {
                           newItems[index] = { ...newItems[index], herramientaId: v }
                           setEditarData({ ...editarData, items: newItems })
                         }}
-					   
-																		  
                         placeholder="Buscar herramienta..."
                       />
-															   
-																																  
-									 
-							  
-										
-										
-									   
-																															   
-																					
-																		 
-										 
-							 
-										
-							   
                     </div>
                     
                     {/* Fila 2: Cantidad, Estado, Costo */}
