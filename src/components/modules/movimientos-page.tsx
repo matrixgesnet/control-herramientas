@@ -356,6 +356,13 @@ export function MovimientosPage() {
   const movimientosPagina = filtered?.slice(indiceInicio, indiceFin)
   
   // Resetear página cuando cambian los filtros
+  const handleFiltroChange = (nuevoValor: string, tipo: 'fechaDesde' | 'fechaHasta' | 'tipo') => {
+    setPaginaActual(1)
+    if (tipo === 'fechaDesde') setFiltroFechaDesde(nuevoValor)
+    if (tipo === 'fechaHasta') setFiltroFechaHasta(nuevoValor)
+    if (tipo === 'tipo') setFiltroTipo(nuevoValor)
+  }
+  
   const limpiarFiltros = () => {
     setFiltroFechaDesde('')
     setFiltroFechaHasta('')
@@ -438,24 +445,24 @@ export function MovimientosPage() {
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
-                <Label className="text-xs whitespace-nowrap">Desde:</Label>
+                <Label className="text-xs">Desde:</Label>
                 <Input
                   type="date"
                   value={filtroFechaDesde}
-                  onChange={(e) => { setFiltroFechaDesde(e.target.value); setPaginaActual(1) }}
+                  onChange={(e) => handleFiltroChange(e.target.value, 'fechaDesde')}
                   className="w-36 h-8 text-sm"
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Label className="text-xs whitespace-nowrap">Hasta:</Label>
+                <Label className="text-xs">Hasta:</Label>
                 <Input
                   type="date"
                   value={filtroFechaHasta}
-                  onChange={(e) => { setFiltroFechaHasta(e.target.value); setPaginaActual(1) }}
+                  onChange={(e) => handleFiltroChange(e.target.value, 'fechaHasta')}
                   className="w-36 h-8 text-sm"
                 />
               </div>
-              <Select value={filtroTipo} onValueChange={(v) => { setFiltroTipo(v); setPaginaActual(1) }}>
+              <Select value={filtroTipo} onValueChange={(v) => handleFiltroChange(v, 'tipo')}>
                 <SelectTrigger className="w-40 h-8 text-sm">
                   <SelectValue placeholder="Tipo..." />
                 </SelectTrigger>
@@ -486,7 +493,7 @@ export function MovimientosPage() {
                 <Input
                   placeholder="Buscar por número..."
                   value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPaginaActual(1) }}
+                  onChange={(e) => setSearch(e.target.value)}
                   className="pl-10 h-8 text-sm"
                 />
               </div>
@@ -636,11 +643,11 @@ export function MovimientosPage() {
           )}
           
           {/* Controles de paginación */}
-          {(filtered?.length || 0) > 0 && (
-            <div className="flex items-center justify-between border-t pt-4 mt-4">
+          {totalPaginas > 0 && (
+            <div className="flex items-center justify-between border-t pt-4">
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span>Mostrando</span>
-                <Select value={itemsPorPagina.toString()} onValueChange={(v) => { setItemsPorPagina(Number(v)); setPaginaActual(1) }}>
+                <Select value={itemsPorPagina.toString()} onValueChange={(v) => setItemsPorPagina(Number(v))}>
                   <SelectTrigger className="w-16 h-8">
                     <SelectValue />
                   </SelectTrigger>
@@ -651,7 +658,7 @@ export function MovimientosPage() {
                     <SelectItem value="100">100</SelectItem>
                   </SelectContent>
                 </Select>
-                <span>de {filtered?.length || 0} registros</span>
+                <span>de {filtered.length} registros</span>
               </div>
               
               <div className="flex items-center gap-2">
@@ -695,7 +702,7 @@ export function MovimientosPage() {
                   variant="outline"
                   size="sm"
                   onClick={() => setPaginaActual(paginaActual + 1)}
-                  disabled={paginaActual === totalPaginas || totalPaginas === 0}
+                  disabled={paginaActual === totalPaginas}
                 >
                   Siguiente
                   <ChevronRight className="w-4 h-4" />
@@ -799,7 +806,10 @@ export function MovimientosPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Sede Origen *</Label>
-                  <Select value={formData.sedeOrigenId} onValueChange={(v) => setFormData({ ...formData, sedeOrigenId: v })}>
+                  <Select 
+                    value={formData.sedeOrigenId} 
+                    onValueChange={(v) => setFormData({ ...formData, sedeOrigenId: v, tecnicoId: '' })}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Seleccionar..." />
                     </SelectTrigger>
@@ -814,18 +824,27 @@ export function MovimientosPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Técnico *</Label>
-                  <Select value={formData.tecnicoId} onValueChange={(v) => setFormData({ ...formData, tecnicoId: v })}>
+                  <Select 
+                    value={formData.tecnicoId} 
+                    onValueChange={(v) => setFormData({ ...formData, tecnicoId: v })}
+                    disabled={!formData.sedeOrigenId}
+                  >
                     <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar..." />
+                      <SelectValue placeholder={formData.sedeOrigenId ? "Seleccionar..." : "Primero seleccione sede..."} />
                     </SelectTrigger>
                     <SelectContent>
-                      {tecnicos?.filter((t: Record<string, unknown>) => t.activo).map((t: Record<string, unknown>) => (
-                        <SelectItem key={t.id as string} value={t.id as string}>
-                          {t.nombre as string} {t.apellido as string} - {t.dni as string}
-                        </SelectItem>
-                      ))}
+                      {tecnicos
+                        ?.filter((t: Record<string, unknown>) => t.activo && t.sedeId === formData.sedeOrigenId)
+                        .map((t: Record<string, unknown>) => (
+                          <SelectItem key={t.id as string} value={t.id as string}>
+                            {t.nombre as string} {t.apellido as string} - {t.dni as string}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
+                  {formData.sedeOrigenId && tecnicos?.filter((t: Record<string, unknown>) => t.activo && t.sedeId === formData.sedeOrigenId).length === 0 && (
+                    <p className="text-xs text-muted-foreground">No hay técnicos activos en esta sede</p>
+                  )}
                 </div>
               </div>
             )}

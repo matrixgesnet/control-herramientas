@@ -122,3 +122,41 @@ ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/ui/
 3. **Test**: `curl http://18.119.125.228` o navegador.
 
 **¡SCP crea carpetas/archivos nuevos sin problemas!** Solo necesita ruta padre.
+
+
+
+**¡Perfecto!** Ya confirmaste que tu proyecto está en `/home/ubuntu/control-herramientas/` (no `herramientas`). Ese era el problema.
+
+## Comando CORRECTO (Git Bash - Windows)
+```bash
+scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/herramienta-combobox.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/ui/
+```
+
+## Los 2 comandos completos (ruta correcta):
+```bash
+# 1. Primer archivo
+scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/modules/movimientos-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/
+######Ejemplo con rutas exactas
+scp -i 'C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem' "F:/Desarrollo2026/control-herramientas/src/components/modules/movimientos-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/
+#####################
+
+
+# 2. Segundo archivo (nuevo)
+scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/herramienta-combobox.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/ui/
+```
+
+## Después de copiar (SSH):
+```bash
+ssh -i "tu-key.pem" ubuntu@18.119.125.228
+cd /home/ubuntu/control-herramientas
+bun run build
+pm2 restart herramientas  # O el nombre de tu PM2 process
+pm2 status
+```
+
+## Verificar PM2
+```bash
+pm2 show herramientas  # Confirma ruta: /home/ubuntu/control-herramientas ✓
+```
+
+**¡Error solucionado!** Solo era la ruta del proyecto (`control-herramientas` vs `herramientas`). Ahora funciona perfecto. [perplexity](https://www.perplexity.ai/search/d325e37c-bd9d-47ba-bc2e-e35600bbacbe)
