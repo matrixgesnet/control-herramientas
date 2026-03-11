@@ -371,7 +371,8 @@ export async function POST(request: Request) {
                 herramientaId: item.herramientaId,
                 sedeId: sedeOrigenId,
                 cantidad: item.cantidad,
-                cantidadDevuelta: 0,//Solo marca como "devuelto" cuando cantidadDevuelta == cantidad
+                cantidadDevuelta: 0,
+                fechaAsignacion: fechaMovimiento, // Usar fecha del movimiento, no la actual
                 serial: item.serial
               }
             })
@@ -783,8 +784,33 @@ export async function PUT(request: Request) {
         return NextResponse.json({ error: 'Las transferencias no se pueden editar. Debe anularlas y crear una nueva.' }, { status: 400 })
       }
 
-      // Si hay items para editar, actualizar stock
-      if (items && items.length > 0) {
+      // Función para comparar si los items cambiaron
+      const itemsCambiaron = (itemsActuales: typeof movimientoActual.items, nuevosItems: typeof items) => {
+        if (!nuevosItems || nuevosItems.length !== itemsActuales.length) {
+          return nuevosItems && nuevosItems.length > 0 // Si hay items nuevos y diferente cantidad, cambiaron
+        }
+        
+        // Ordenar ambos arrays por herramientaId para comparar
+        const actualesOrdenados = [...itemsActuales].sort((a, b) => a.herramientaId.localeCompare(b.herramientaId))
+        const nuevosOrdenados = [...nuevosItems].sort((a, b) => a.herramientaId.localeCompare(b.herramientaId))
+        
+        for (let i = 0; i < actualesOrdenados.length; i++) {
+          const actual = actualesOrdenados[i]
+          const nuevo = nuevosOrdenados[i]
+          
+          if (actual.herramientaId !== nuevo.herramientaId) return true
+          if (Math.abs(actual.cantidad - parseFloat(nuevo.cantidad || 0)) > 0.001) return true
+          if ((actual.serial || '') !== (nuevo.serial || '')) return true
+        }
+        
+        return false // No cambiaron
+      }
+
+      // Verificar si los items cambiaron realmente
+      const hayCambiosEnItems = items && itemsCambiaron(movimientoActual.items, items)
+
+      // Si hay items para editar y REALMENTE CAMBIARON, actualizar stock y asignaciones
+      if (hayCambiosEnItems) {
         // Obtener costo promedio para items sin costo
         const itemsConCosto = await Promise.all(items.map(async (item: { herramientaId: string; cantidad: number; costoUnitario: number; serial?: string; estado?: string }) => {
           let costoUnitario = parseFloat(item.costoUnitario) || 0
@@ -875,18 +901,19 @@ export async function PUT(request: Request) {
                     data: { cantidad: { increment: cantidadAntigua } }
                   })
                 }
-                // Quitar asignación
+                // CORREGIDO: Eliminar la asignación completamente (no marcar como devuelto)
+                // Esto evita duplicados y problemas con el cálculo de pendientes
                 const asignacion = await tx.asignacionTecnico.findFirst({
                   where: {
                     tecnicoId: movimientoActual.tecnicoId!,
                     herramientaId: itemAntiguo.herramientaId,
-                    estado: 'asignado'
-                  }
+                    cantidadDevuelta: 0 // Solo eliminar asignaciones sin devoluciones
+                  },
+                  orderBy: { fechaAsignacion: 'desc' } // La más reciente primero
                 })
                 if (asignacion) {
-                  await tx.asignacionTecnico.update({
-                    where: { id: asignacion.id },
-                    data: { estado: 'devuelto', fechaDevolucion: new Date() }
+                  await tx.asignacionTecnico.delete({
+                    where: { id: asignacion.id }
                   })
                 }
                 break
@@ -906,19 +933,24 @@ export async function PUT(request: Request) {
                     data: { cantidad: { decrement: cantidadAntigua } }
                   })
                 }
-                // Reactivar asignación
+                // CORREGIDO: Reactivar asignación reduciendo cantidadDevuelta
                 const asignacion = await tx.asignacionTecnico.findFirst({
                   where: {
                     tecnicoId: movimientoActual.tecnicoId!,
                     herramientaId: itemAntiguo.herramientaId,
-                    estado: 'devuelto'
+                    cantidadDevuelta: { gt: 0 } // Buscar asignaciones con devoluciones
                   },
                   orderBy: { fechaDevolucion: 'desc' }
                 })
                 if (asignacion) {
+                  const nuevaCantidadDevuelta = asignacion.cantidadDevuelta - cantidadAntigua
                   await tx.asignacionTecnico.update({
                     where: { id: asignacion.id },
-                    data: { estado: 'asignado', fechaDevolucion: null }
+                    data: { 
+                      cantidadDevuelta: nuevaCantidadDevuelta,
+                      estado: nuevaCantidadDevuelta < asignacion.cantidad ? 'asignado' : 'devuelto',
+                      fechaDevolucion: null
+                    }
                   })
                 }
                 break
@@ -1062,6 +1094,9 @@ export async function PUT(request: Request) {
                     herramientaId: item.herramientaId,
                     sedeId: movimientoActual.sedeOrigenId!,
                     cantidad: item.cantidad,
+                    cantidadDevuelta: 0,
+                    // CORREGIDO: Usar fecha editada si existe, sino la fecha original del movimiento
+                    fechaAsignacion: fechaMovimiento || movimientoActual.fecha,
                     serial: item.serial
                   }
                 })
@@ -1092,19 +1127,25 @@ export async function PUT(request: Request) {
                   })
                 }
 
+                // CORREGIDO: Buscar asignación con cantidad pendiente y actualizar correctamente
                 const asignacion = await tx.asignacionTecnico.findFirst({
                   where: {
                     tecnicoId: movimientoActual.tecnicoId!,
                     herramientaId: item.herramientaId,
                     estado: 'asignado'
-                  }
+                  },
+                  orderBy: { fechaAsignacion: 'asc' } // FIFO: Primero en entrar, primero en salir
                 })
                 if (asignacion) {
+                  const nuevaCantidadDevuelta = asignacion.cantidadDevuelta + item.cantidad
+                  const cantidadPendiente = asignacion.cantidad - nuevaCantidadDevuelta
+                  
                   await tx.asignacionTecnico.update({
                     where: { id: asignacion.id },
                     data: { 
-                      estado: 'devuelto', 
-                      fechaDevolucion: new Date(),
+                      cantidadDevuelta: nuevaCantidadDevuelta,
+                      estado: cantidadPendiente <= 0 ? 'devuelto' : 'asignado',
+                      fechaDevolucion: cantidadPendiente <= 0 ? new Date() : null,
                       estadoHerramienta: item.estado
                     }
                   })
