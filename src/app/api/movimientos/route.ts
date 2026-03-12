@@ -786,9 +786,8 @@ export async function PUT(request: Request) {
 
       // Función para comparar si los items cambiaron
       const itemsCambiaron = (itemsActuales: typeof movimientoActual.items, nuevosItems: typeof items) => {
-        if (!nuevosItems || nuevosItems.length !== itemsActuales.length) {
-          return nuevosItems && nuevosItems.length > 0 // Si hay items nuevos y diferente cantidad, cambiaron
-        }
+        if (!nuevosItems) return false
+        if (nuevosItems.length !== itemsActuales.length) return true
         
         // Ordenar ambos arrays por herramientaId para comparar
         const actualesOrdenados = [...itemsActuales].sort((a, b) => a.herramientaId.localeCompare(b.herramientaId))
@@ -901,15 +900,13 @@ export async function PUT(request: Request) {
                     data: { cantidad: { increment: cantidadAntigua } }
                   })
                 }
-                // CORREGIDO: Eliminar la asignación completamente (no marcar como devuelto)
-                // Esto evita duplicados y problemas con el cálculo de pendientes
+                // CORREGIDO: Eliminar la asignación completamente si no tiene devoluciones parciales
                 const asignacion = await tx.asignacionTecnico.findFirst({
                   where: {
                     tecnicoId: movimientoActual.tecnicoId!,
                     herramientaId: itemAntiguo.herramientaId,
-                    cantidadDevuelta: 0 // Solo eliminar asignaciones sin devoluciones
-                  },
-                  orderBy: { fechaAsignacion: 'desc' } // La más reciente primero
+                    cantidadDevuelta: 0 // Solo eliminar si no tiene devoluciones parciales
+                  }
                 })
                 if (asignacion) {
                   await tx.asignacionTecnico.delete({
@@ -938,7 +935,7 @@ export async function PUT(request: Request) {
                   where: {
                     tecnicoId: movimientoActual.tecnicoId!,
                     herramientaId: itemAntiguo.herramientaId,
-                    cantidadDevuelta: { gt: 0 } // Buscar asignaciones con devoluciones
+                    cantidadDevuelta: { gt: 0 }
                   },
                   orderBy: { fechaDevolucion: 'desc' }
                 })
@@ -1095,7 +1092,7 @@ export async function PUT(request: Request) {
                     sedeId: movimientoActual.sedeOrigenId!,
                     cantidad: item.cantidad,
                     cantidadDevuelta: 0,
-                    // CORREGIDO: Usar fecha editada si existe, sino la fecha original del movimiento
+                    // CORREGIDO: Usar fecha editada si existe, sino la fecha original
                     fechaAsignacion: fechaMovimiento || movimientoActual.fecha,
                     serial: item.serial
                   }
@@ -1127,25 +1124,19 @@ export async function PUT(request: Request) {
                   })
                 }
 
-                // CORREGIDO: Buscar asignación con cantidad pendiente y actualizar correctamente
                 const asignacion = await tx.asignacionTecnico.findFirst({
                   where: {
                     tecnicoId: movimientoActual.tecnicoId!,
                     herramientaId: item.herramientaId,
                     estado: 'asignado'
-                  },
-                  orderBy: { fechaAsignacion: 'asc' } // FIFO: Primero en entrar, primero en salir
+                  }
                 })
                 if (asignacion) {
-                  const nuevaCantidadDevuelta = asignacion.cantidadDevuelta + item.cantidad
-                  const cantidadPendiente = asignacion.cantidad - nuevaCantidadDevuelta
-                  
                   await tx.asignacionTecnico.update({
                     where: { id: asignacion.id },
                     data: { 
-                      cantidadDevuelta: nuevaCantidadDevuelta,
-                      estado: cantidadPendiente <= 0 ? 'devuelto' : 'asignado',
-                      fechaDevolucion: cantidadPendiente <= 0 ? new Date() : null,
+                      estado: 'devuelto', 
+                      fechaDevolucion: new Date(),
                       estadoHerramienta: item.estado
                     }
                   })

@@ -139,7 +139,10 @@ scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/modul
 ######Ejemplo con rutas exactas
 scp -i 'C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem' "F:/Desarrollo2026/control-herramientas/src/components/modules/movimientos-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/
 #####################
+scp -i 'C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem' "F:/Desarrollo2026/control-herramientas/src/app/api/corregir-asignaciones/route.ts" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/app/api/corregir-asignaciones/
 
+src/app/api/movimientos/route.ts
+scp -i 'C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem' "F:/Desarrollo2026/control-herramientas/src/app/api/movimientos/route.ts" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/app/api/movimientos/
 
 # 2. Segundo archivo (nuevo)
 scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/herramienta-combobox.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/ui/

@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { useToast } from '@/hooks/use-toast'
 import { 
   Plus, Search, ShoppingCart, ArrowRightLeft, UserMinus, RotateCcw, Trash2, 
   AlertTriangle, Pencil, XCircle, Eye, EyeOff, ChevronLeft, ChevronRight, FileText
@@ -158,6 +159,7 @@ const getHerramientaDisplay = (herramientaId: string, herramientas: Record<strin
 export function MovimientosPage() {
   const { data: session } = useSession()
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [search, setSearch] = useState('')
   const [incluirAnulados, setIncluirAnulados] = useState(false)
   
@@ -229,6 +231,14 @@ export function MovimientosPage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDialogOpen(false)
       resetForm()
+      toast({ title: 'Éxito', description: 'Movimiento creado correctamente' })
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Error al crear', 
+        description: error.message || 'No se pudo crear el movimiento',
+        variant: 'destructive'
+      })
     }
   })
 
@@ -242,6 +252,14 @@ export function MovimientosPage() {
       setDialogAnularOpen(false)
       setMovimientoAnular(null)
       setMotivoAnulacion('')
+      toast({ title: 'Éxito', description: 'Movimiento anulado correctamente' })
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Error al anular', 
+        description: error.message || 'No se pudo anular el movimiento',
+        variant: 'destructive'
+      })
     }
   })
 
@@ -251,6 +269,14 @@ export function MovimientosPage() {
       queryClient.invalidateQueries({ queryKey: ['movimientos'] })
       setDialogEditarOpen(false)
       setMovimientoEditar(null)
+      toast({ title: 'Éxito', description: 'Movimiento actualizado correctamente' })
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Error al editar', 
+        description: error.message || 'No se pudo actualizar el movimiento',
+        variant: 'destructive'
+      })
     }
   })
 
@@ -263,6 +289,14 @@ export function MovimientosPage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDialogEliminarOpen(false)
       setMovimientoEliminar(null)
+      toast({ title: 'Éxito', description: 'Movimiento eliminado correctamente' })
+    },
+    onError: (error: Error) => {
+      toast({ 
+        title: 'Error al eliminar', 
+        description: error.message || 'No se pudo eliminar el movimiento',
+        variant: 'destructive'
+      })
     }
   })
 
@@ -528,6 +562,7 @@ export function MovimientosPage() {
                     <TableHead className="text-right">Items</TableHead>
                     <TableHead className="text-right">Monto Total</TableHead>
                     <TableHead>Estado</TableHead>
+                    <TableHead>Auditoría</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -541,6 +576,7 @@ export function MovimientosPage() {
                     const sedeDestino = m.sedeDestino as Record<string, unknown> | undefined
                     const tecnico = m.tecnico as Record<string, unknown> | undefined
                     const anuladoPor = m.anuladoPor as Record<string, unknown> | undefined
+                    const usuario = m.usuario as Record<string, unknown> | undefined
                     
                     return (
                       <TableRow key={m.id as string} className={esAnulado ? 'bg-red-50 opacity-70' : ''}>
@@ -591,6 +627,12 @@ export function MovimientosPage() {
                             <Badge variant="default" className="bg-green-100 text-green-700">Activo</Badge>
                           )}
                         </TableCell>
+                        <TableCell>
+                          <div className="text-xs">
+                            <p className="font-medium">{usuario?.name as string || '-'}</p>
+                            <p className="text-muted-foreground">{usuario?.email as string}</p>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-1">
                             {!esAnulado && (
@@ -632,7 +674,7 @@ export function MovimientosPage() {
                   })}
                   {movimientosPagina?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                         No se encontraron movimientos
                       </TableCell>
                     </TableRow>
@@ -1222,12 +1264,13 @@ export function MovimientosPage() {
               className="bg-orange-500 hover:bg-orange-600"
               onClick={() => {
                 if (movimientoEditar) {
+                  const datosAEnviar = {
+                    ...editarData,
+                    items: editarData.items?.filter(i => i.herramientaId && i.cantidad)
+                  }
                   editarMutation.mutate({ 
                     id: movimientoEditar.id as string, 
-                    data: {
-                      ...editarData,
-                      items: editarData.items?.filter(i => i.herramientaId && i.cantidad)
-                    }
+                    data: datosAEnviar
                   })
                 }
               }}
