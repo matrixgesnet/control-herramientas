@@ -44,61 +44,24 @@ export function ReporteSedePage() {
     }
   }
 
-  // Exportar a CSV
-  const exportToCSV = () => {
-    if (!reporte) return
+  // Exportar a Excel
+  const exportToExcel = async () => {
+    if (!sedeId) return
 
-    // Crear encabezados
-    const headers = ['Código', 'Herramienta']
+    try {
+      const response = await fetch(`/api/reportes-sede/excel?sedeId=${sedeId}`)
+      if (!response.ok) throw new Error('Error al generar Excel')
 
-    // Agregar columnas de técnicos
-    reporte.tecnicos.forEach((t: { nombre: string }) => {
-      headers.push(t.nombre)
-    })
-
-    headers.push('Stock Sede', 'Total Técnicos', 'Total')
-
-    // Crear filas
-    const rows = reporte.herramientas.map((h: {
-      codigo: string
-      nombre: string
-      datosPorTecnico: Record<string, { cantidad: number; estado: string | null }>
-      stockTotal: number
-      totalTecnicos: number
-      total: number
-    }) => {
-      const row = [h.codigo, h.nombre]
-
-      reporte.tecnicos.forEach((t: { id: string }) => {
-        const dato = h.datosPorTecnico[t.id]
-        if (dato && dato.cantidad > 0) {
-          if (dato.estado && dato.estado !== 'BUENO') {
-            row.push(`${dato.cantidad} (${dato.estado})`)
-          } else {
-            row.push(dato.cantidad.toString())
-          }
-        } else {
-          row.push('0')
-        }
-      })
-
-      row.push(h.stockTotal.toString())
-      row.push(h.totalTecnicos.toString())
-      row.push(h.total.toString())
-      return row
-    })
-
-    // Generar CSV
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
-
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `reporte_${reporte.sede?.nombre || 'sede'}_${new Date().toISOString().split('T')[0]}.csv`
-    link.click()
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `reporte_${reporte?.sede?.nombre || 'sede'}_${new Date().toISOString().split('T')[0]}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Error al exportar Excel:', error)
+    }
   }
 
   // Exportar a PDF
@@ -256,9 +219,9 @@ export function ReporteSedePage() {
               {reporte.sede?.nombre} - {reporte.herramientas?.length} herramientas
             </CardTitle>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={exportToCSV}>
+              <Button variant="outline" size="sm" onClick={exportToExcel}>
                 <FileDown className="w-4 h-4 mr-2" />
-                CSV
+                Excel
               </Button>
               <Button variant="outline" size="sm" onClick={exportToPDF}>
                 <FileText className="w-4 h-4 mr-2" />
