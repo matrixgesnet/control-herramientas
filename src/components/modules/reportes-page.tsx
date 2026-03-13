@@ -62,29 +62,24 @@ export function ReportesPage() {
     enabled: activeTab === 'tecnicos'
   })
 
-  // Exportar a CSV
-  const exportToCSV = (data: Record<string, unknown>[], filename: string) => {
-    if (!data || data.length === 0) return
-    
-    const headers = Object.keys(data[0])
-    const csvContent = [
-      headers.join(','),
-      ...data.map(row => headers.map(h => {
-        const value = row[h]
-        // Escapar comillas y envolver en comillas si contiene comas
-        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-          return `"${value.replace(/"/g, '""')}"`
-        }
-        return value ?? ''
-      }).join(','))
-    ].join('\n')
-    
-    // Agregar BOM para que Excel reconozca caracteres especiales
-    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `${filename}.csv`
-    link.click()
+  // Exportar a Excel
+  const exportToExcel = async (tipo: string, sedeId?: string) => {
+    try {
+      const params = new URLSearchParams({ tipo })
+      if (sedeId) params.append('sedeId', sedeId)
+      const response = await fetch(`/api/reportes/excel?${params}`)
+      if (!response.ok) throw new Error('Error al generar Excel')
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `reporte_${tipo}_${new Date().toISOString().split('T')[0]}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Error al exportar Excel:', error)
+    }
   }
 
   // Exportar a PDF (abre ventana de impresión con opción de guardar como PDF)
@@ -362,10 +357,10 @@ export function ReportesPage() {
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={() => exportToCSV(stockTotal, getFilename('stock-total'))}
+                  onClick={() => exportToExcel('stock-total')}
                 >
                   <FileDown className="w-4 h-4 mr-2" />
-                  CSV
+                  Excel
                 </Button>
                 <Button 
                   variant="outline" 
@@ -476,10 +471,10 @@ export function ReportesPage() {
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    onClick={() => exportToCSV(stockSede?.items, getFilename(`stock-${stockSede?.sede}`))}
+                    onClick={() => exportToExcel('stock-sede', sedeId)}
                   >
                     <FileDown className="w-4 h-4 mr-2" />
-                    CSV
+                    Excel
                   </Button>
                   <Button 
                     variant="outline" 
@@ -581,10 +576,10 @@ export function ReportesPage() {
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  onClick={() => exportToCSV(tecnicosAsignaciones, getFilename('tecnicos-asignaciones'))}
+                  onClick={() => exportToExcel('tecnicos-asignaciones')}
                 >
                   <FileDown className="w-4 h-4 mr-2" />
-                  CSV
+                  Excel
                 </Button>
                 <Button 
                   variant="outline" 
