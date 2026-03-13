@@ -123,13 +123,18 @@ export async function GET(request: Request) {
         stockPorEstado[se.estado] = se.cantidad
       })
 
+      // Calcular total de herramientas en poder de técnicos
+      const totalTecnicos = Object.values(datosPorTecnico).reduce((sum, d) => sum + d.cantidad, 0)
+      const stockSede = stockTotal?.cantidad || 0
+
       return {
         codigo: herramienta.codigo,
         nombre: herramienta.nombre,
-        categoria: herramienta.categoria?.nombre || '-',
         unidad: herramienta.unidad,
         datosPorTecnico,
-        stockTotal: stockTotal?.cantidad || 0,
+        stockTotal: stockSede,
+        totalTecnicos,
+        total: totalTecnicos + stockSede,
         stockPorEstado
       }
     })

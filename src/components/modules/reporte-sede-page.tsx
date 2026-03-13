@@ -49,25 +49,26 @@ export function ReporteSedePage() {
     if (!reporte) return
 
     // Crear encabezados
-    const headers = ['Código', 'Categoría', 'Herramienta']
-    
+    const headers = ['Código', 'Herramienta']
+
     // Agregar columnas de técnicos
     reporte.tecnicos.forEach((t: { nombre: string }) => {
       headers.push(t.nombre)
     })
-    
-    headers.push('Stock Sede')
+
+    headers.push('Stock Sede', 'Total Técnicos', 'Total')
 
     // Crear filas
     const rows = reporte.herramientas.map((h: {
       codigo: string
-      categoria: string
       nombre: string
       datosPorTecnico: Record<string, { cantidad: number; estado: string | null }>
       stockTotal: number
+      totalTecnicos: number
+      total: number
     }) => {
-      const row = [h.codigo, h.categoria, h.nombre]
-      
+      const row = [h.codigo, h.nombre]
+
       reporte.tecnicos.forEach((t: { id: string }) => {
         const dato = h.datosPorTecnico[t.id]
         if (dato && dato.cantidad > 0) {
@@ -80,8 +81,10 @@ export function ReporteSedePage() {
           row.push('0')
         }
       })
-      
+
       row.push(h.stockTotal.toString())
+      row.push(h.totalTecnicos.toString())
+      row.push(h.total.toString())
       return row
     })
 
@@ -106,16 +109,17 @@ export function ReporteSedePage() {
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
 
-    const tecnicosHeader = reporte?.tecnicos?.map((t: { nombre: string }) => 
+    const tecnicosHeader = reporte?.tecnicos?.map((t: { nombre: string }) =>
       `<th style="padding: 8px; border: 1px solid #ddd; font-size: 11px;">${t.nombre}</th>`
     ).join('') || ''
 
     const rows = reporte?.herramientas?.map((h: {
       codigo: string
-      categoria: string
       nombre: string
       datosPorTecnico: Record<string, { cantidad: number; estado: string | null }>
       stockTotal: number
+      totalTecnicos: number
+      total: number
     }) => {
       const tecnicoCells = reporte.tecnicos.map((t: { id: string }) => {
         const dato = h.datosPorTecnico[t.id]
@@ -131,10 +135,11 @@ export function ReporteSedePage() {
       return `
         <tr>
           <td style="padding: 6px; border: 1px solid #ddd; font-family: monospace; font-size: 11px;">${h.codigo}</td>
-          <td style="padding: 6px; border: 1px solid #ddd; font-size: 11px;">${h.categoria}</td>
           <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold; font-size: 11px;">${h.nombre}</td>
           ${tecnicoCells}
           <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-weight: bold; font-size: 11px;">${h.stockTotal}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-weight: bold; font-size: 11px; background-color: #fff7ed;">${h.totalTecnicos}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-weight: bold; font-size: 11px; background-color: #fed7aa;">${h.total}</td>
         </tr>
       `
     }).join('') || ''
@@ -168,10 +173,11 @@ export function ReporteSedePage() {
             <thead>
               <tr>
                 <th>Código</th>
-                <th>Categoría</th>
                 <th>Herramienta</th>
                 ${tecnicosHeader}
                 <th>Stock Sede</th>
+                <th>Total Técnicos</th>
+                <th>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -269,29 +275,30 @@ export function ReporteSedePage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-orange-500 text-white">
-                    <th className="p-2 text-left font-medium sticky left-0 bg-orange-500 z-10">Código</th>
-                    <th className="p-2 text-left font-medium">Categoría</th>
-                    <th className="p-2 text-left font-medium">Herramienta</th>
+                    <th className="p-2 text-left font-medium sticky left-0 bg-orange-500 z-20 min-w-[80px]">Código</th>
+                    <th className="p-2 text-left font-medium sticky left-[80px] bg-orange-500 z-10 min-w-[200px]">Herramienta</th>
                     {reporte.tecnicos?.map((t: { id: string; nombre: string }) => (
-                      <th key={t.id} className="p-2 text-center font-medium whitespace-nowrap">
+                      <th key={t.id} className="p-2 text-center font-medium whitespace-nowrap min-w-[80px]">
                         {t.nombre}
                       </th>
                     ))}
-                    <th className="p-2 text-center font-medium sticky right-0 bg-orange-500">Stock Sede</th>
+                    <th className="p-2 text-center font-medium min-w-[80px]">Stock Sede</th>
+                    <th className="p-2 text-center font-medium bg-orange-600 min-w-[90px]">Total Técnicos</th>
+                    <th className="p-2 text-center font-medium sticky right-0 bg-orange-600 min-w-[70px]">Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {reporte.herramientas?.map((h: {
                     codigo: string
                     nombre: string
-                    categoria: string
                     datosPorTecnico: Record<string, { cantidad: number; estado: string | null }>
                     stockTotal: number
+                    totalTecnicos: number
+                    total: number
                   }) => (
                     <tr key={h.codigo} className="border-b hover:bg-slate-50">
-                      <td className="p-2 font-mono sticky left-0 bg-white">{h.codigo}</td>
-                      <td className="p-2 text-muted-foreground">{h.categoria}</td>
-                      <td className="p-2 font-medium">{h.nombre}</td>
+                      <td className="p-2 font-mono sticky left-0 bg-white z-20">{h.codigo}</td>
+                      <td className="p-2 font-medium sticky left-[80px] bg-white z-10">{h.nombre}</td>
                       {reporte.tecnicos?.map((t: { id: string }) => {
                         const dato = h.datosPorTecnico[t.id]
                         if (dato && dato.cantidad > 0) {
@@ -300,7 +307,7 @@ export function ReporteSedePage() {
                                              dato.estado === 'DANADO' ? 'bg-red-100 text-red-700' :
                                              dato.estado === 'EN_MANTENIMIENTO' ? 'bg-purple-100 text-purple-700' :
                                              ''
-                          
+
                           if (dato.estado && dato.estado !== 'BUENO') {
                             return (
                               <td key={t.id} className="p-2 text-center">
@@ -318,12 +325,14 @@ export function ReporteSedePage() {
                         }
                         return <td key={t.id} className="p-2 text-center text-muted-foreground">-</td>
                       })}
-                      <td className="p-2 text-center font-bold sticky right-0 bg-white">{h.stockTotal}</td>
+                      <td className="p-2 text-center font-bold">{h.stockTotal}</td>
+                      <td className="p-2 text-center font-bold bg-orange-50">{h.totalTecnicos}</td>
+                      <td className="p-2 text-center font-bold sticky right-0 bg-orange-100">{h.total}</td>
                     </tr>
                   ))}
                   {reporte.herramientas?.length === 0 && (
                     <tr>
-                      <td colSpan={4 + (reporte.tecnicos?.length || 0)} className="p-8 text-center text-muted-foreground">
+                      <td colSpan={5 + (reporte.tecnicos?.length || 0)} className="p-8 text-center text-muted-foreground">
                         No hay herramientas registradas en esta sede
                       </td>
                     </tr>
@@ -339,6 +348,8 @@ export function ReporteSedePage() {
                   <span><strong>Total Herramientas:</strong> {reporte.herramientas?.length}</span>
                   <span><strong>Técnicos:</strong> {reporte.tecnicos?.length}</span>
                   <span><strong>Total Stock Sede:</strong> {reporte.herramientas?.reduce((sum: number, h: { stockTotal: number }) => sum + h.stockTotal, 0)}</span>
+                  <span><strong>Total Técnicos:</strong> {reporte.herramientas?.reduce((sum: number, h: { totalTecnicos: number }) => sum + h.totalTecnicos, 0)}</span>
+                  <span className="text-orange-600 font-semibold"><strong>Gran Total:</strong> {reporte.herramientas?.reduce((sum: number, h: { total: number }) => sum + h.total, 0)}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Badge className="bg-green-100 text-green-700">Bueno</Badge>
