@@ -161,5 +161,15 @@ pm2 status
 ```bash
 pm2 show herramientas  # Confirma ruta: /home/ubuntu/control-herramientas ✓
 ```
+# ###ejm de copiar archivos al servidor de ubuntu
 
-**¡Error solucionado!** Solo era la ruta del proyecto (`control-herramientas` vs `herramientas`). Ahora funciona perfecto. [perplexity](https://www.perplexity.ai/search/d325e37c-bd9d-47ba-bc2e-e35600bbacbe)
+scp -i 'C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem' "F:/Desarrollo2026/control-herramientas/src/components/modules/reporte-sede-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/
+
+scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/app/api/reportes-sede/excel/route.ts" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/app/api/reportes-sede/excel/
+
+scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/modules/reportes-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/
+
+scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/app/api/reportes/excel/route.ts" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/app/api/reportes/excel/
+
+scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/app/api/reportes-sede/route.ts" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/app/api/reportes-sede/
+
