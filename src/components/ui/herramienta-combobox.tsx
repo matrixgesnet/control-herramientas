@@ -26,7 +26,7 @@ interface Herramienta {
 }
 
 interface HerramientaComboboxProps {
-  herramientas: Herramienta[]
+  herramientas: Herramienta[] | undefined | null
   value: string
   onChange: (value: string) => void
   placeholder?: string
@@ -34,7 +34,7 @@ interface HerramientaComboboxProps {
 }
 
 export function HerramientaCombobox({
-  herramientas,
+  herramientas: herramientasProp,
   value,
   onChange,
   placeholder = 'Seleccionar herramienta...',
@@ -43,6 +43,16 @@ export function HerramientaCombobox({
   const [open, setOpen] = React.useState(false)
   const [search, setSearch] = React.useState('')
 
+  // Normalizar herramientas a siempre ser un array
+  const herramientas = React.useMemo(() => {
+    if (!herramientasProp) return []
+    if (!Array.isArray(herramientasProp)) {
+      console.warn('herramientasProp no es un array:', typeof herramientasProp, herramientasProp)
+      return []
+    }
+    return herramientasProp
+  }, [herramientasProp])
+
   // Filtrar herramientas activas y por búsqueda
   const herramientasFiltradas = React.useMemo(() => {
     const activas = herramientas.filter(h => h.activo !== false)
@@ -50,13 +60,16 @@ export function HerramientaCombobox({
     
     const searchLower = search.toLowerCase()
     return activas.filter(h => 
-      h.codigo.toLowerCase().includes(searchLower) ||
-      h.nombre.toLowerCase().includes(searchLower)
+      h.codigo?.toLowerCase().includes(searchLower) ||
+      h.nombre?.toLowerCase().includes(searchLower)
     )
   }, [herramientas, search])
 
   // Encontrar la herramienta seleccionada para mostrar
-  const selectedHerramienta = herramientas.find(h => h.id === value)
+  const selectedHerramienta = React.useMemo(() => {
+    if (!value || herramientas.length === 0) return null
+    return herramientas.find(h => h.id === value)
+  }, [herramientas, value])
 
   return (
     <Popover open={open} onOpenChange={setOpen}>

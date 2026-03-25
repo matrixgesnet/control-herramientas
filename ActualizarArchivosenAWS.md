@@ -149,7 +149,7 @@ scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/he
 ```
 
 ## Después de copiar (SSH):
-```bash
+bash
 ssh -i "tu-key.pem" ubuntu@18.119.125.228
 cd /home/ubuntu/control-herramientas
 bun run build

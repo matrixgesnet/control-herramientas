@@ -31,10 +31,34 @@ import {
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Pencil, Trash2, Search, Wrench } from 'lucide-react'
+import { Plus, Pencil, Search, Wrench, FileDown, FileText, Printer } from 'lucide-react'
 
-async function fetchHerramientas() {
-  const res = await fetch('/api/herramientas')
+interface HerramientaData {
+  id: string
+  codigo: string
+  nombre: string
+  descripcion: string | null
+  unidad: string
+  categoriaId: string | null
+  marca: string | null
+  modelo: string | null
+  controlaStock: boolean
+  stockMaximo: number | null
+  stockMinimo: number | null
+  costoPromedio: number
+  activo: boolean
+  categoria: { nombre: string } | null
+  stockTotal: number
+  stockPorSede: Record<string, number>
+}
+
+interface ApiResponse {
+  herramientas: HerramientaData[]
+  sedes: string[]
+}
+
+async function fetchHerramientas(): Promise<ApiResponse> {
+  const res = await fetch('/api/herramientas?conStockPorSede=true')
   if (!res.ok) throw new Error('Error al cargar herramientas')
   return res.json()
 }
@@ -77,7 +101,6 @@ export function HerramientasPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<Record<string, unknown> | null>(null)
   const [formData, setFormData] = useState({
-    codigo: '',
     nombre: '',
     descripcion: '',
     unidad: 'UND',
@@ -90,10 +113,13 @@ export function HerramientasPage() {
     activo: true
   })
 
-  const { data: herramientas, isLoading } = useQuery({
-    queryKey: ['herramientas'],
+  const { data, isLoading } = useQuery({
+    queryKey: ['herramientas-con-sede'],
     queryFn: fetchHerramientas
   })
+
+  const herramientas = data?.herramientas || []
+  const sedes = data?.sedes || []
 
   const { data: categorias } = useQuery({
     queryKey: ['categorias'],
@@ -103,6 +129,7 @@ export function HerramientasPage() {
   const createMutation = useMutation({
     mutationFn: createHerramienta,
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['herramientas-con-sede'] })
       queryClient.invalidateQueries({ queryKey: ['herramientas'] })
       setDialogOpen(false)
       resetForm()
@@ -112,6 +139,7 @@ export function HerramientasPage() {
   const updateMutation = useMutation({
     mutationFn: updateHerramienta,
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['herramientas-con-sede'] })
       queryClient.invalidateQueries({ queryKey: ['herramientas'] })
       setDialogOpen(false)
       resetForm()
@@ -120,7 +148,6 @@ export function HerramientasPage() {
 
   const resetForm = () => {
     setFormData({
-      codigo: '',
       nombre: '',
       descripcion: '',
       unidad: 'UND',
@@ -147,7 +174,6 @@ export function HerramientasPage() {
   const openEdit = (item: Record<string, unknown>) => {
     setEditingItem(item)
     setFormData({
-      codigo: item.codigo as string,
       nombre: item.nombre as string,
       descripcion: (item.descripcion as string) || '',
       unidad: (item.unidad as string) || 'UND',
@@ -162,10 +188,81 @@ export function HerramientasPage() {
     setDialogOpen(true)
   }
 
-  const filtered = herramientas?.filter((h: Record<string, unknown>) =>
-    (h.codigo as string)?.toLowerCase().includes(search.toLowerCase()) ||
-    (h.nombre as string)?.toLowerCase().includes(search.toLowerCase())
+  const filtered = herramientas?.filter((h) =>
+    h.nombre?.toLowerCase().includes(search.toLowerCase()) ||
+    h.codigo?.toLowerCase().includes(search.toLowerCase())
   )
+
+  // Exportar a Excel
+  const exportToExcel = async () => {
+    try {
+      const response = await fetch('/api/herramientas/excel')
+      if (!response.ok) throw new Error('Error al generar Excel')
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `herramientas_${new Date().toISOString().split('T')[0]}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error('Error al exportar Excel:', error)
+    }
+  }
+
+  // Exportar a PDF
+  const exportToPDF = () => {
+    const printContent = document.getElementById('tabla-herramientas')
+    if (!printContent) return
+
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) return
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Listado de Herramientas</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; padding: 20px; font-size: 10px; }
+            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px; }
+            .header h1 { font-size: 16px; margin-bottom: 5px; }
+            .header p { color: #666; font-size: 10px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th { background-color: #f97316; color: white; padding: 6px 4px; text-align: left; font-size: 9px; font-weight: bold; }
+            td { padding: 4px; border-bottom: 1px solid #ddd; font-size: 9px; }
+            tr:nth-child(even) { background-color: #f9f9f9; }
+            .text-right { text-align: right; }
+            .text-center { text-align: center; }
+            .footer { margin-top: 20px; text-align: center; color: #666; font-size: 9px; }
+            @media print { body { padding: 10px; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>🛠️ Listado de Herramientas</h1>
+            <p>Generado: ${new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          </div>
+          ${printContent.innerHTML}
+          <div class="footer">
+            <p>Sistema de Control de Herramientas - Total: ${filtered?.length || 0} herramientas</p>
+          </div>
+        </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+    setTimeout(() => {
+      printWindow.print()
+    }, 500)
+  }
+
+  // Imprimir
+  const handlePrint = () => {
+    exportToPDF()
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -174,14 +271,28 @@ export function HerramientasPage() {
           <h1 className="text-3xl font-bold">Herramientas</h1>
           <p className="text-muted-foreground">Gestión del catálogo de herramientas y materiales</p>
         </div>
-        <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="bg-orange-500 hover:bg-orange-600">
-          <Plus className="w-4 h-4 mr-2" />
-          Nueva Herramienta
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={exportToExcel}>
+            <FileDown className="w-4 h-4 mr-2" />
+            Excel
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportToPDF}>
+            <FileText className="w-4 h-4 mr-2" />
+            PDF
+          </Button>
+          <Button variant="outline" size="sm" onClick={handlePrint}>
+            <Printer className="w-4 h-4 mr-2" />
+            Imprimir
+          </Button>
+          <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="bg-orange-500 hover:bg-orange-600">
+            <Plus className="w-4 h-4 mr-2" />
+            Nueva Herramienta
+          </Button>
+        </div>
       </div>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-3 bg-slate-100">
           <div className="flex items-center gap-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -192,55 +303,68 @@ export function HerramientasPage() {
                 className="pl-10"
               />
             </div>
+            <div className="text-sm text-muted-foreground">
+              Total: {filtered?.length || 0} herramientas
+            </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {isLoading ? (
-            <p>Cargando...</p>
+            <p className="p-4">Cargando...</p>
           ) : (
             <div className="overflow-auto">
-              <Table>
+              <Table id="tabla-herramientas">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Código</TableHead>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Categoría</TableHead>
-                    <TableHead>Unidad</TableHead>
-                    <TableHead className="text-right">Stock Total</TableHead>
-                    <TableHead className="text-right">Costo Prom.</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
+                  <TableRow className="bg-orange-500 hover:bg-orange-600">
+                    <TableHead className="text-white font-bold">Código</TableHead>
+                    <TableHead className="text-white font-bold">Nombre</TableHead>
+                    <TableHead className="text-white font-bold w-[100px]">Categoría</TableHead>
+                    <TableHead className="text-white font-bold w-[60px]">Unidad</TableHead>
+                    <TableHead className="text-white font-bold text-right w-[80px]">Stock Mín.</TableHead>
+                    <TableHead className="text-white font-bold text-right w-[80px]">Stock Total</TableHead>
+                    {sedes.map((sede) => (
+                      <TableHead key={sede} className="text-white font-bold text-right w-[70px]">{sede}</TableHead>
+                    ))}
+                    <TableHead className="text-white font-bold">Descripción</TableHead>
+                    <TableHead className="text-white font-bold text-right w-[80px]">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered?.map((h: Record<string, unknown>) => (
-                    <TableRow key={h.id as string}>
-                      <TableCell className="font-mono font-medium">{h.codigo as string}</TableCell>
+                  {filtered?.map((h) => (
+                    <TableRow key={h.id}>
+                      <TableCell className="font-mono font-medium">{h.codigo}</TableCell>
                       <TableCell>
                         <div>
-                          <p className="font-medium">{h.nombre as string}</p>
-                          {(h.marca as string) && (
-                            <p className="text-xs text-muted-foreground">{h.marca as string}</p>
+                          <p className="font-medium">{h.nombre}</p>
+                          {h.marca && (
+                            <p className="text-xs text-muted-foreground">{h.marca}</p>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>{(h.categoria as Record<string, unknown>)?.nombre || '-'}</TableCell>
-                      <TableCell>{h.unidad as string}</TableCell>
-                      <TableCell className="text-right">
-                        <Badge variant={((h.stockTotal as number) || 0) > 0 ? 'default' : 'destructive'}>
-                          {h.stockTotal as number}
+                      <TableCell className="w-[100px]">{h.categoria?.nombre || '-'}</TableCell>
+                      <TableCell className="w-[60px]">{h.unidad}</TableCell>
+                      <TableCell className="text-right w-[80px]">
+                        {h.stockMinimo ?? '-'}
+                      </TableCell>
+                      <TableCell className="text-right w-[80px]">
+                        <Badge variant={h.stockTotal > 0 ? 'default' : 'destructive'}>
+                          {h.stockTotal}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right">
-                        S/ {(h.costoPromedio as number)?.toFixed(2) || '0.00'}
+                      {sedes.map((sede) => (
+                        <TableCell key={sede} className="text-right w-[70px]">
+                          {(h.stockPorSede?.[sede] || 0) > 0 ? (
+                            <span className="font-medium">{h.stockPorSede?.[sede] || 0}</span>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </TableCell>
+                      ))}
+                      <TableCell className="max-w-[200px] truncate" title={h.descripcion || ''}>
+                        {h.descripcion || '-'}
                       </TableCell>
-                      <TableCell>
-                        <Badge variant={h.activo ? 'default' : 'secondary'}>
-                          {h.activo ? 'Activo' : 'Inactivo'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(h)}>
+                      <TableCell className="text-right w-[80px]">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(h as Record<string, unknown>)}>
                           <Pencil className="w-4 h-4" />
                         </Button>
                       </TableCell>
@@ -248,7 +372,7 @@ export function HerramientasPage() {
                   ))}
                   {filtered?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8 + sedes.length} className="text-center py-8 text-muted-foreground">
                         <Wrench className="w-12 h-12 mx-auto mb-2 opacity-50" />
                         No se encontraron herramientas
                       </TableCell>
@@ -270,30 +394,46 @@ export function HerramientasPage() {
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Código *</Label>
-                <Input
-                  value={formData.codigo}
-                  onChange={(e) => setFormData({ ...formData, codigo: e.target.value })}
-                  required
-                />
+            {editingItem && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Código</Label>
+                  <Input
+                    value={editingItem.codigo as string}
+                    disabled
+                    className="bg-slate-100"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Nombre *</Label>
+                  <Input
+                    value={formData.nombre}
+                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                    required
+                  />
+                </div>
               </div>
+            )}
+            
+            {!editingItem && (
               <div className="space-y-2">
                 <Label>Nombre *</Label>
                 <Input
                   value={formData.nombre}
                   onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
                   required
+                  placeholder="Ingrese el nombre de la herramienta"
                 />
+                <p className="text-xs text-muted-foreground">El código se generará automáticamente</p>
               </div>
-            </div>
+            )}
 
             <div className="space-y-2">
               <Label>Descripción</Label>
               <Textarea
                 value={formData.descripcion}
                 onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+                placeholder="Descripción de la herramienta"
               />
             </div>
 
