@@ -158,7 +158,7 @@ export function TecnicosPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Técnicos</h1>
+          <h1 className="text-3xl font-bold">Relación  de Técnicos</h1>
           <p className="text-muted-foreground">Gestión de técnicos y sus asignaciones</p>
         </div>
         <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="bg-orange-500 hover:bg-orange-600">

@@ -1,4 +1,4 @@
-Para actualizar **solo 2 archivos específicos** desde tu PC local (sin afectar cambios locales en AWS), usa SCP (copia segura por SSH). Es directo, rápido y no toca Git
+Para actualizar **solo archivos específicos** desde tu PC local (sin afectar cambios locales en AWS), usa SCP (copia segura por SSH). Es directo, rápido y no toca Git
 
 ## Método 1: SCP (Recomendado - 1 min)
 1. **Desde tu PC** (con key.pem):
@@ -6,13 +6,13 @@ Para actualizar **solo 2 archivos específicos** desde tu PC local (sin afectar 
    # Copia archivo1 (ej: src/app/page.tsx)
    scp -i tu-key.pem /ruta/local/archivo1.tsx ubuntu@18.119.125.228:/home/ubuntu/herramientas/src/app/
 
-   # Copia archivo2
-   scp -i tu-key.pem /ruta/local/archivo2.ts ubuntu@18.119.125.228:/home/ubuntu/herramientas/src/components/
+   # Copia archivo2 (con la ruta exacta)
+   scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/modules/herramientas-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/
    ```
 
 2. **En AWS** (SSH):
    ```
-   cd /home/ubuntu/herramientas  # Ruta de tu app "herramientas"
+   cd /home/ubuntu/control-herramientas  # Ruta de tu app "herramientas"
    bun run build  # Rebuild (solo si cambiaste código fuente)
    pm2 reload herramientas  # Reinicia sin downtime
    pm2 status
@@ -61,13 +61,11 @@ curl localhost:3000  # Test
 **¡SCP es perfecto para 2 archivos!** No Git, no riesgos. Di nombres archivos/ruta si necesitas comando exacto. 
 
 
-
-
 **¡Perfecto!** Para un archivo **nuevo** (`herramienta-combobox.tsx`), **SCP lo crea automáticamente** en la carpeta destino. Solo asegúrate que la ruta padre exista en AWS.
 
 ## Comando Exacto (Git Bash en Windows)
 ```bash
-scp -i "C:/ruta-a-tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/herramienta-combobox.tsx" ubuntu@18.119.125.228:/home/ubuntu/herramientas/src/components/ui/
+scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/herramienta-combobox.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/ui/
 ```
 
 ## Si la Carpeta `ui/` NO Existe en AWS
@@ -123,8 +121,6 @@ ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/ui/
 
 **¡SCP crea carpetas/archivos nuevos sin problemas!** Solo necesita ruta padre.
 
-
-
 **¡Perfecto!** Ya confirmaste que tu proyecto está en `/home/ubuntu/control-herramientas/` (no `herramientas`). Ese era el problema.
 
 ## Comando CORRECTO (Git Bash - Windows)
@@ -149,8 +145,8 @@ scp -i "tu-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/ui/he
 ```
 
 ## Después de copiar (SSH):
-bash
-ssh -i "tu-key.pem" ubuntu@18.119.125.228
+bash (debo estar en la carpeta donde esta el .pem para ejecutar el comando q sigue)
+ssh -i "herramientas-vps-nodejs-key.pem" ubuntu@18.119.125.228
 cd /home/ubuntu/control-herramientas
 bun run build
 pm2 restart herramientas  # O el nombre de tu PM2 process
@@ -173,3 +169,4 @@ scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarroll
 
 scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/app/api/reportes-sede/route.ts" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/app/api/reportes-sede/
 
+scp -i "C:/Users/Matrix/Downloads/herramientas-vps-nodejs-key.pem" "F:/Desarrollo2026/control-herramientas/src/components/modules/tecnicos-page.tsx" ubuntu@18.119.125.228:/home/ubuntu/control-herramientas/src/components/modules/

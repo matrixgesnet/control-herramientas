@@ -32,15 +32,15 @@ interface SidebarProps {
 const menuItems: { id: PageType; label: string; icon: React.ReactNode; roles?: string[] }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-5 h-5" /> },
   { id: 'herramientas', label: 'Herramientas', icon: <Wrench className="w-5 h-5" /> },
-  { id: 'tecnicos', label: 'Técnicos', icon: <Users className="w-5 h-5" /> },
-  { id: 'sedes', label: 'Sedes / Almacenes', icon: <Building2 className="w-5 h-5" /> },
   { id: 'movimientos', label: 'Movimientos', icon: <ArrowRightLeft className="w-5 h-5" /> },
   { id: 'kardex', label: 'Kardex', icon: <FileText className="w-5 h-5" /> },
   { id: 'consulta', label: 'Consulta', icon: <Search className="w-5 h-5" /> },
   { id: 'reportes', label: 'Reportes', icon: <FileText className="w-5 h-5" /> },
-  { id: 'categorias', label: 'Categorías', icon: <Package className="w-5 h-5" /> },
-  { id: 'usuarios', label: 'Usuarios', icon: <Settings className="w-5 h-5" />, roles: ['admin'] },
   { id: 'reporte-sede', label: 'Reporte por Sede', icon: <Building2 className="w-5 h-5" /> },
+  { id: 'tecnicos', label: 'Técnicos', icon: <Users className="w-5 h-5" /> },
+  { id: 'categorias', label: 'Categorías', icon: <Package className="w-5 h-5" /> },
+  { id: 'sedes', label: 'Sedes / Almacenes', icon: <Building2 className="w-5 h-5" /> },
+  { id: 'usuarios', label: 'Usuarios', icon: <Settings className="w-5 h-5" />, roles: ['admin'] },
 ]
 
 function getRoleBadge(role: string) {
