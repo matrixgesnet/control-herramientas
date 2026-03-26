@@ -3,7 +3,7 @@ import { getCurrentUser } from '@/lib/utils-server'
 import { NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 
-// GET - Exportar herramientas a Excel
+// GET - Exportar listado de herramientas a Excel
 export async function GET() {
   try {
     const user = await getCurrentUser()
@@ -11,14 +11,13 @@ export async function GET() {
       return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
     }
 
-    // Obtener todas las sedes activas
+    // Obtener sedes
     const sedes = await db.sede.findMany({
-      where: { activo: true },
       orderBy: { nombre: 'asc' }
     })
 
+    // Obtener herramientas con stocks
     const herramientas = await db.herramienta.findMany({
-      where: { activo: true },
       orderBy: { nombre: 'asc' },
       include: {
         categoria: true,
@@ -28,41 +27,27 @@ export async function GET() {
       }
     })
 
-    // Preparar datos con stock por sede
-    const reporte = herramientas.map(h => {
-      const stockPorSede: Record<string, number> = {}
-      sedes.forEach(sede => {
-        const stockSede = h.stocks.find(s => s.sedeId === sede.id)
-        stockPorSede[sede.nombre] = stockSede?.cantidad || 0
-      })
-
-      return {
-        codigo: h.codigo,
-        nombre: h.nombre,
-        categoria: h.categoria?.nombre || '-',
-        unidad: h.unidad,
-        stockMinimo: h.stockMinimo || 0,
-        stockTotal: h.stocks.reduce((sum, s) => sum + s.cantidad, 0),
-        stockPorSede,
-        descripcion: h.descripcion || '-'
-      }
-    })
+    // Helper para obtener stock por sede
+    const getStockPorSede = (h: typeof herramientas[0], sedeId: string): number => {
+      const stock = h.stocks.find(s => s.sedeId === sedeId)
+      return stock?.cantidad || 0
+    }
 
     // Crear workbook Excel
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('Herramientas')
 
     // Configurar estilos
-    const borderStyle = { style: 'thin' as const, color: { argb: 'FFD1D5DB' } }
     const headerFill = {
       type: 'pattern' as const,
       pattern: 'solid' as const,
       fgColor: { argb: 'FFF97316' }
     }
-    const headerFont = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 }
+    const headerFont = { bold: true, color: { argb: 'FF000000' }, size: 11 }
+    const borderStyle = { style: 'thin' as const, color: { argb: 'FFD1D5DB' } }
 
     // Título
-    worksheet.mergeCells('A1:K1')
+    worksheet.mergeCells('A1:Z1')
     const titleCell = worksheet.getCell('A1')
     titleCell.value = 'Listado de Herramientas'
     titleCell.font = { bold: true, size: 16, color: { argb: 'FF1F2937' } }
@@ -70,17 +55,18 @@ export async function GET() {
     worksheet.getRow(1).height = 30
 
     // Fecha
-    worksheet.mergeCells('A2:K2')
+    worksheet.mergeCells('A2:Z2')
     const dateCell = worksheet.getCell('A2')
-    dateCell.value = `Generado: ${new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`
+    dateCell.value = `Generado: ${new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} - Total: ${herramientas.length} herramientas`
     dateCell.font = { italic: true, size: 10, color: { argb: 'FF6B7280' } }
     worksheet.getRow(2).height = 20
 
-    // Encabezados (fila 4)
-    const headers = ['Código', 'Nombre', 'Categoría', 'Unidad', 'Stock Mín.', 'Stock Total']
-    sedes.forEach(s => headers.push(s.nombre))
-    headers.push('Descripción')
+    // Construir encabezados
+    const headers = ['Código', 'Nombre', 'Categoría', 'Unidad', 'Stock Mín.']
+    sedes.forEach(sede => headers.push(sede.nombre))
+    headers.push('Stock Total', 'Descripción')
 
+    // Escribir encabezados (fila 4)
     const headerRow = worksheet.getRow(4)
     headers.forEach((header, index) => {
       const cell = headerRow.getCell(index + 1)
@@ -98,7 +84,7 @@ export async function GET() {
     worksheet.getRow(4).height = 25
 
     // Datos
-    reporte.forEach((item, rowIndex) => {
+    herramientas.forEach((item, rowIndex) => {
       const row = worksheet.getRow(rowIndex + 5)
 
       // Código
@@ -111,7 +97,7 @@ export async function GET() {
       row.getCell(2).font = { bold: true, size: 10 }
 
       // Categoría
-      row.getCell(3).value = item.categoria
+      row.getCell(3).value = item.categoria?.nombre || '-'
       row.getCell(3).alignment = { horizontal: 'left' }
 
       // Unidad
@@ -119,28 +105,31 @@ export async function GET() {
       row.getCell(4).alignment = { horizontal: 'center' }
 
       // Stock Mínimo
-      row.getCell(5).value = item.stockMinimo
-      row.getCell(5).alignment = { horizontal: 'right' }
-
-      // Stock Total
-      row.getCell(6).value = item.stockTotal
-      row.getCell(6).alignment = { horizontal: 'right' }
-      row.getCell(6).font = { bold: true, size: 10 }
+      row.getCell(5).value = item.stockMinimo || '-'
+      row.getCell(5).alignment = { horizontal: 'center' }
 
       // Stock por sede
-      let colIndex = 7
+      let colIndex = 6
       sedes.forEach(sede => {
-        const stockSede = item.stockPorSede[sede.nombre] || 0
-        row.getCell(colIndex).value = stockSede
-        row.getCell(colIndex).alignment = { horizontal: 'right' }
-        if (stockSede > 0) {
-          row.getCell(colIndex).font = { bold: true, size: 10 }
+        const stock = getStockPorSede(item, sede.id)
+        const cell = row.getCell(colIndex)
+        cell.value = stock
+        cell.alignment = { horizontal: 'center' }
+        if (stock > 0) {
+          cell.font = { bold: true, size: 10 }
         }
         colIndex++
       })
 
+      // Stock Total
+      const stockTotal = item.stocks.reduce((sum, s) => sum + s.cantidad, 0)
+      row.getCell(colIndex).value = stockTotal
+      row.getCell(colIndex).alignment = { horizontal: 'center' }
+      row.getCell(colIndex).font = { bold: true, size: 10 }
+      colIndex++
+
       // Descripción
-      row.getCell(colIndex).value = item.descripcion
+      row.getCell(colIndex).value = item.descripcion || '-'
       row.getCell(colIndex).alignment = { horizontal: 'left' }
 
       // Bordes
@@ -154,45 +143,20 @@ export async function GET() {
       }
     })
 
-    // Fila de totales
-    const totalRow = worksheet.getRow(reporte.length + 5)
-    totalRow.getCell(1).value = 'TOTALES'
-    totalRow.getCell(1).font = { bold: true, size: 11 }
-    totalRow.getCell(6).value = { formula: `SUM(F5:F${reporte.length + 4})` }
-    totalRow.getCell(6).font = { bold: true, size: 10 }
-    totalRow.getCell(6).alignment = { horizontal: 'right' }
-
-    // Totales por sede
-    let colIndex = 7
-    sedes.forEach(() => {
-      const colLetter = getColumnLetter(colIndex)
-      totalRow.getCell(colIndex).value = { formula: `SUM(${colLetter}5:${colLetter}${reporte.length + 4})` }
-      totalRow.getCell(colIndex).font = { bold: true, size: 10 }
-      totalRow.getCell(colIndex).alignment = { horizontal: 'right' }
-      colIndex++
-    })
-
-    // Bordes fila total
-    for (let i = 1; i <= headers.length; i++) {
-      totalRow.getCell(i).border = {
-        top: { style: 'medium', color: { argb: 'FF9CA3AF' } },
-        left: borderStyle,
-        bottom: borderStyle,
-        right: borderStyle
-      }
-    }
-
     // Ajustar anchos de columna
-    worksheet.columns.forEach((column, index) => {
-      if (index === 0) column.width = 10 // Código
-      else if (index === 1) column.width = 35 // Nombre
-      else if (index === 2) column.width = 12 // Categoría
-      else if (index === 3) column.width = 8 // Unidad
-      else if (index === 4) column.width = 10 // Stock Mín
-      else if (index === 5) column.width = 10 // Stock Total
-      else if (index === headers.length - 1) column.width = 30 // Descripción
-      else column.width = 10 // Sedes
+    worksheet.getColumn(1).width = 10   // Código
+    worksheet.getColumn(2).width = 35   // Nombre
+    worksheet.getColumn(3).width = 15   // Categoría
+    worksheet.getColumn(4).width = 8    // Unidad
+    worksheet.getColumn(5).width = 10   // Stock Mín.
+    
+    // Columnas de sedes
+    sedes.forEach((_, index) => {
+      worksheet.getColumn(6 + index).width = 10
     })
+    
+    worksheet.getColumn(6 + sedes.length).width = 12     // Stock Total
+    worksheet.getColumn(7 + sedes.length).width = 30     // Descripción
 
     // Generar buffer
     const buffer = await workbook.xlsx.writeBuffer()
@@ -209,16 +173,4 @@ export async function GET() {
     console.error('Error al generar Excel:', error)
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 })
   }
-}
-
-// Función auxiliar para obtener letra de columna
-function getColumnLetter(col: number): string {
-  let letter = ''
-  let temp = col
-  while (temp > 0) {
-    const mod = (temp - 1) % 26
-    letter = String.fromCharCode(65 + mod) + letter
-    temp = Math.floor((temp - 1) / 26)
-  }
-  return letter
 }

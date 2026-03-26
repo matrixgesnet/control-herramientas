@@ -13,7 +13,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const categoriaId = searchParams.get('categoriaId')
     const activo = searchParams.get('activo')
-    const conStockPorSede = searchParams.get('conStockPorSede') // Nuevo parámetro
+    const conStockPorSede = searchParams.get('conStockPorSede')
 
     const where: Record<string, unknown> = {}
     
@@ -25,15 +25,14 @@ export async function GET(request: Request) {
       where.activo = activo === 'true'
     }
 
-    // Obtener todas las sedes activas
+    // Obtener sedes para el reporte
     const sedes = await db.sede.findMany({
-      where: { activo: true },
       orderBy: { nombre: 'asc' }
     })
 
     const herramientas = await db.herramienta.findMany({
       where,
-      orderBy: { nombre: 'asc' }, // Ordenar por nombre
+      orderBy: { nombre: 'asc' },
       include: {
         categoria: true,
         stocks: {
@@ -42,54 +41,26 @@ export async function GET(request: Request) {
       }
     })
 
-    // Calcular stock total y stock por sede
-    const herramientasConStock = herramientas.map(h => {
-      // Crear objeto con stock por cada sede
-      const stockPorSede: Record<string, number> = {}
-      sedes.forEach(sede => {
-        const stockSede = h.stocks.find(s => s.sedeId === sede.id)
-        stockPorSede[sede.nombre] = stockSede?.cantidad || 0
-      })
+    // Calcular stock total
+    const herramientasConStock = herramientas.map(h => ({
+      ...h,
+      stockTotal: h.stocks.reduce((sum, s) => sum + s.cantidad, 0)
+    }))
 
-      return {
-        ...h,
-        stockTotal: h.stocks.reduce((sum, s) => sum + s.cantidad, 0),
-        stockPorSede
-      }
-    })
-
-    // Si se solicita con stock por sede, devolver objeto con sedes
+    // Si se solicita con stock por sede, retornar objeto con herramientas y sedes
     if (conStockPorSede === 'true') {
       return NextResponse.json({
         herramientas: herramientasConStock,
-        sedes: sedes.map(s => s.nombre)
+        sedes
       })
     }
 
-    // Por defecto, devolver array simple para compatibilidad con otros componentes
+    // Por defecto, retornar solo el array de herramientas (para compatibilidad con combobox)
     return NextResponse.json(herramientasConStock)
   } catch (error) {
     console.error('Error al obtener herramientas:', error)
     return NextResponse.json({ error: 'Error interno del servidor' }, { status: 500 })
   }
-}
-
-// Función para generar el siguiente código
-async function generarSiguienteCodigo(): Promise<string> {
-  // Buscar todos los códigos y encontrar el máximo numérico
-  const herramientas = await db.herramienta.findMany({
-    select: { codigo: true }
-  })
-  
-  let maxNumero = 1000
-  herramientas.forEach(h => {
-    const num = parseInt(h.codigo, 10)
-    if (!isNaN(num) && num > maxNumero) {
-      maxNumero = num
-    }
-  })
-  
-  return String(maxNumero + 1)
 }
 
 // POST - Crear nueva herramienta
@@ -110,18 +81,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'El nombre es requerido' }, { status: 400 })
     }
 
-    // Generar código automáticamente
-    const codigo = await generarSiguienteCodigo()
+    // Generar código automático simplificado
+    // Obtener todas las herramientas y encontrar el máximo código numérico
+    const todasHerramientas = await db.herramienta.findMany({
+      select: { codigo: true }
+    })
+
+    let maxCodigo = 1000
+    for (const h of todasHerramientas) {
+      const num = parseInt(h.codigo, 10)
+      if (!isNaN(num) && num > maxCodigo) {
+        maxCodigo = num
+      }
+    }
+
+    let nuevoCodigo = (maxCodigo + 1).toString()
+
+    // Verificar que el código no exista (por seguridad)
+    let intentos = 0
+    let codigoDisponible = false
+    while (!codigoDisponible && intentos < 100) {
+      const existing = await db.herramienta.findUnique({ where: { codigo: nuevoCodigo } })
+      if (existing) {
+        maxCodigo++
+        nuevoCodigo = (maxCodigo + 1).toString()
+        intentos++
+      } else {
+        codigoDisponible = true
+      }
+    }
 
     const herramienta = await db.herramienta.create({
       data: {
-        codigo,
+        codigo: nuevoCodigo,
         nombre,
-        descripcion,
+        descripcion: descripcion || null,
         unidad: unidad || 'UND',
-        categoriaId,
-        marca,
-        modelo,
+        categoriaId: categoriaId || null,
+        marca: marca || null,
+        modelo: modelo || null,
         controlaStock: controlaStock ?? true,
         stockMaximo: stockMaximo ? parseFloat(stockMaximo) : null,
         stockMinimo: stockMinimo ? parseFloat(stockMinimo) : null,
@@ -152,21 +150,15 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'ID es requerido' }, { status: 400 })
     }
 
-    // No permitir actualizar el código (es autogenerado y no debe cambiar)
+    // No permitir actualizar el código desde el frontend
+    delete data.codigo
 
     const herramienta = await db.herramienta.update({
       where: { id },
       data: {
-        nombre: data.nombre,
-        descripcion: data.descripcion,
-        unidad: data.unidad,
-        categoriaId: data.categoriaId,
-        marca: data.marca,
-        modelo: data.modelo,
-        controlaStock: data.controlaStock,
+        ...data,
         stockMaximo: data.stockMaximo ? parseFloat(data.stockMaximo) : null,
-        stockMinimo: data.stockMinimo ? parseFloat(data.stockMinimo) : null,
-        activo: data.activo
+        stockMinimo: data.stockMinimo ? parseFloat(data.stockMinimo) : null
       },
       include: { categoria: true }
     })

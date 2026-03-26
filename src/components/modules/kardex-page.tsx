@@ -63,8 +63,13 @@ export function KardexPage() {
   const [fechaHasta, setFechaHasta] = useState('')
   const [searchHerramienta, setSearchHerramienta] = useState('')
 
-  const { data: herramientas } = useQuery({ queryKey: ['herramientas'], queryFn: fetchHerramientas })
+  const { data: herramientasData } = useQuery({ queryKey: ['herramientas'], queryFn: fetchHerramientas })
   const { data: sedes } = useQuery({ queryKey: ['sedes'], queryFn: fetchSedes })
+
+  // Asegurar que herramientas sea un array (compatibilidad con API que retorna objeto o array)
+  const herramientas = Array.isArray(herramientasData) 
+    ? herramientasData 
+    : (herramientasData?.herramientas || [])
 
   const { data: kardexData, isLoading: kardexLoading, refetch: fetchKardexData } = useQuery({
     queryKey: ['kardex', herramientaId, sedeId, fechaDesde, fechaHasta],

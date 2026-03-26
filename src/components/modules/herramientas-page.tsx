@@ -31,33 +31,10 @@ import {
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Pencil, Search, Wrench, FileDown, FileText, Printer } from 'lucide-react'
+import { useToast } from '@/hooks/use-toast'
+import { Plus, Pencil, Search, Wrench, FileSpreadsheet, FileText, Printer, Loader2 } from 'lucide-react'
 
-interface HerramientaData {
-  id: string
-  codigo: string
-  nombre: string
-  descripcion: string | null
-  unidad: string
-  categoriaId: string | null
-  marca: string | null
-  modelo: string | null
-  controlaStock: boolean
-  stockMaximo: number | null
-  stockMinimo: number | null
-  costoPromedio: number
-  activo: boolean
-  categoria: { nombre: string } | null
-  stockTotal: number
-  stockPorSede: Record<string, number>
-}
-
-interface ApiResponse {
-  herramientas: HerramientaData[]
-  sedes: string[]
-}
-
-async function fetchHerramientas(): Promise<ApiResponse> {
+async function fetchHerramientas() {
   const res = await fetch('/api/herramientas?conStockPorSede=true')
   if (!res.ok) throw new Error('Error al cargar herramientas')
   return res.json()
@@ -97,6 +74,7 @@ async function updateHerramienta(data: Record<string, unknown>) {
 
 export function HerramientasPage() {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [search, setSearch] = useState('')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<Record<string, unknown> | null>(null)
@@ -114,10 +92,11 @@ export function HerramientasPage() {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['herramientas-con-sede'],
+    queryKey: ['herramientas-stock-sede'],
     queryFn: fetchHerramientas
   })
 
+  // Extraer herramientas y sedes del response
   const herramientas = data?.herramientas || []
   const sedes = data?.sedes || []
 
@@ -129,20 +108,42 @@ export function HerramientasPage() {
   const createMutation = useMutation({
     mutationFn: createHerramienta,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['herramientas-con-sede'] })
+      queryClient.invalidateQueries({ queryKey: ['herramientas-stock-sede'] })
       queryClient.invalidateQueries({ queryKey: ['herramientas'] })
       setDialogOpen(false)
       resetForm()
+      toast({
+        title: 'Éxito',
+        description: 'Herramienta creada correctamente',
+      })
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Error al crear la herramienta',
+        variant: 'destructive'
+      })
     }
   })
 
   const updateMutation = useMutation({
     mutationFn: updateHerramienta,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['herramientas-con-sede'] })
+      queryClient.invalidateQueries({ queryKey: ['herramientas-stock-sede'] })
       queryClient.invalidateQueries({ queryKey: ['herramientas'] })
       setDialogOpen(false)
       resetForm()
+      toast({
+        title: 'Éxito',
+        description: 'Herramienta actualizada correctamente',
+      })
+    },
+    onError: (error: Error) => {
+      toast({
+        title: 'Error',
+        description: error.message || 'Error al actualizar la herramienta',
+        variant: 'destructive'
+      })
     }
   })
 
@@ -188,34 +189,74 @@ export function HerramientasPage() {
     setDialogOpen(true)
   }
 
-  const filtered = herramientas?.filter((h) =>
-    h.nombre?.toLowerCase().includes(search.toLowerCase()) ||
-    h.codigo?.toLowerCase().includes(search.toLowerCase())
+  // Helper para obtener stock por sede
+  const getStockPorSede = (h: Record<string, unknown>, sedeId: string): number => {
+    const stocks = h.stocks as { sedeId: string; cantidad: number }[] | undefined
+    if (!stocks) return 0
+    const stock = stocks.find(s => s.sedeId === sedeId)
+    return stock?.cantidad || 0
+  }
+
+  const filtered = herramientas?.filter((h: Record<string, unknown>) =>
+    (h.codigo as string)?.toLowerCase().includes(search.toLowerCase()) ||
+    (h.nombre as string)?.toLowerCase().includes(search.toLowerCase())
   )
 
-  // Exportar a Excel
-  const exportToExcel = async () => {
+  // Función para exportar a Excel
+  const handleExportExcel = async () => {
     try {
       const response = await fetch('/api/herramientas/excel')
       if (!response.ok) throw new Error('Error al generar Excel')
-
+      
       const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `herramientas_${new Date().toISOString().split('T')[0]}.xlsx`
-      link.click()
-      URL.revokeObjectURL(url)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `herramientas_${new Date().toISOString().split('T')[0]}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
     } catch (error) {
       console.error('Error al exportar Excel:', error)
+      alert('Error al generar el archivo Excel')
     }
   }
 
-  // Exportar a PDF
-  const exportToPDF = () => {
-    const printContent = document.getElementById('tabla-herramientas')
-    if (!printContent) return
+  // Función para exportar a PDF (usando ventana de impresión)
+  const handleExportPDF = () => {
+    // Crear encabezados de sedes
+    const sedesHeaders = sedes?.map((s: { nombre: string }) => 
+      `<th style="padding: 8px; border: 1px solid #ddd; font-size: 10px; text-align: center;">${s.nombre}</th>`
+    ).join('') || ''
 
+    // Crear filas de datos
+    const rows = filtered?.map((h: Record<string, unknown>) => {
+      // Stock por sede
+      const stockCells = sedes?.map((sede: { id: string; nombre: string }) => {
+        const stock = getStockPorSede(h, sede.id)
+        return `<td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-size: 10px;">${stock}</td>`
+      }).join('') || ''
+
+      const stockTotal = h.stockTotal as number || 0
+      const descripcion = (h.descripcion as string) || '-'
+      const descripcionCorta = descripcion.length > 25 ? descripcion.substring(0, 25) + '...' : descripcion
+
+      return `
+        <tr>
+          <td style="padding: 6px; border: 1px solid #ddd; font-family: monospace; font-size: 10px;">${h.codigo}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; font-weight: bold; font-size: 10px;">${h.nombre}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; font-size: 10px;">${(h.categoria as Record<string, unknown>)?.nombre || '-'}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-size: 10px;">${h.unidad}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-size: 10px;">${h.stockMinimo || '-'}</td>
+          ${stockCells}
+          <td style="padding: 6px; border: 1px solid #ddd; text-align: center; font-weight: bold; font-size: 10px;">${stockTotal}</td>
+          <td style="padding: 6px; border: 1px solid #ddd; font-size: 10px; color: #666;">${descripcionCorta}</td>
+        </tr>
+      `
+    }).join('') || ''
+
+    // Abrir ventana de impresión
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
 
@@ -225,29 +266,45 @@ export function HerramientasPage() {
         <head>
           <title>Listado de Herramientas</title>
           <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: Arial, sans-serif; padding: 20px; font-size: 10px; }
-            .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 15px; }
-            .header h1 { font-size: 16px; margin-bottom: 5px; }
+            body { font-family: Arial, sans-serif; padding: 15px; font-size: 11px; }
+            .header { text-align: center; margin-bottom: 15px; border-bottom: 2px solid #f97316; padding-bottom: 10px; }
+            .header h1 { font-size: 16px; margin-bottom: 5px; color: #333; }
             .header p { color: #666; font-size: 10px; }
             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th { background-color: #f97316; color: white; padding: 6px 4px; text-align: left; font-size: 9px; font-weight: bold; }
-            td { padding: 4px; border-bottom: 1px solid #ddd; font-size: 9px; }
+            th { background-color: #f97316; color: black; padding: 8px; border: 1px solid #ddd; font-size: 10px; font-weight: bold; }
+            td { padding: 6px; border: 1px solid #ddd; font-size: 10px; }
             tr:nth-child(even) { background-color: #f9f9f9; }
-            .text-right { text-align: right; }
-            .text-center { text-align: center; }
-            .footer { margin-top: 20px; text-align: center; color: #666; font-size: 9px; }
-            @media print { body { padding: 10px; } }
+            .footer { margin-top: 15px; text-align: center; color: #666; font-size: 9px; }
+            @media print { 
+              body { padding: 10px; }
+              @page { size: landscape; margin: 10mm; }
+            }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>🛠️ Listado de Herramientas</h1>
-            <p>Generado: ${new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <h1>LISTADO DE HERRAMIENTAS</h1>
+            <p>Generado: ${new Date().toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} - Total: ${filtered?.length || 0} herramientas</p>
           </div>
-          ${printContent.innerHTML}
+          <table>
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Nombre</th>
+                <th>Categoría</th>
+                <th>Unidad</th>
+                <th>Stock Mín.</th>
+                ${sedesHeaders}
+                <th>Stock Total</th>
+                <th>Descripción</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
           <div class="footer">
-            <p>Sistema de Control de Herramientas - Total: ${filtered?.length || 0} herramientas</p>
+            <p>Sistema de Control de Herramientas</p>
           </div>
         </body>
       </html>
@@ -259,28 +316,28 @@ export function HerramientasPage() {
     }, 500)
   }
 
-  // Imprimir
+  // Función para imprimir
   const handlePrint = () => {
-    exportToPDF()
+    handleExportPDF()
   }
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Herramientas</h1>
-          <p className="text-muted-foreground">Gestión del catálogo de herramientas y materiales</p>
+          <h1 className="text-3xl font-bold">Stock de Herramientas</h1>
+          <p className="text-muted-foreground">Tabla maestra de herramientas</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportToExcel}>
-            <FileDown className="w-4 h-4 mr-2" />
+        <div className="flex items-center gap-2">
+          <Button onClick={handleExportExcel} variant="outline" size="sm">
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
             Excel
           </Button>
-          <Button variant="outline" size="sm" onClick={exportToPDF}>
+          <Button onClick={handleExportPDF} variant="outline" size="sm">
             <FileText className="w-4 h-4 mr-2" />
             PDF
           </Button>
-          <Button variant="outline" size="sm" onClick={handlePrint}>
+          <Button onClick={handlePrint} variant="outline" size="sm">
             <Printer className="w-4 h-4 mr-2" />
             Imprimir
           </Button>
@@ -292,7 +349,7 @@ export function HerramientasPage() {
       </div>
 
       <Card>
-        <CardHeader className="pb-3 bg-slate-100">
+        <CardHeader className="pb-3">
           <div className="flex items-center gap-4">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -303,68 +360,61 @@ export function HerramientasPage() {
                 className="pl-10"
               />
             </div>
-            <div className="text-sm text-muted-foreground">
-              Total: {filtered?.length || 0} herramientas
-            </div>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent>
           {isLoading ? (
-            <p className="p-4">Cargando...</p>
+            <p>Cargando...</p>
           ) : (
             <div className="overflow-auto">
-              <Table id="tabla-herramientas">
+              <Table>
                 <TableHeader>
-                  <TableRow className="bg-orange-500 hover:bg-orange-600">
-                    <TableHead className="text-white font-bold">Código</TableHead>
-                    <TableHead className="text-white font-bold">Nombre</TableHead>
-                    <TableHead className="text-white font-bold w-[100px]">Categoría</TableHead>
-                    <TableHead className="text-white font-bold w-[60px]">Unidad</TableHead>
-                    <TableHead className="text-white font-bold text-right w-[80px]">Stock Mín.</TableHead>
-                    <TableHead className="text-white font-bold text-right w-[80px]">Stock Total</TableHead>
-                    {sedes.map((sede) => (
-                      <TableHead key={sede} className="text-white font-bold text-right w-[70px]">{sede}</TableHead>
+                  <TableRow className="bg-orange-50 hover:bg-orange-50">
+                    <TableHead className="font-semibold">Código</TableHead>
+                    <TableHead className="font-semibold">Nombre</TableHead>
+                    <TableHead className="font-semibold w-28">Categoría</TableHead>
+                    <TableHead className="font-semibold">Unidad</TableHead>
+                    <TableHead className="font-semibold text-right">Stock Mín.</TableHead>
+                    {sedes?.map((sede: { id: string; nombre: string }) => (
+                      <TableHead key={sede.id} className="font-semibold text-right">
+                        {sede.nombre}
+                      </TableHead>
                     ))}
-                    <TableHead className="text-white font-bold">Descripción</TableHead>
-                    <TableHead className="text-white font-bold text-right w-[80px]">Acciones</TableHead>
+                    <TableHead className="font-semibold text-right">Stock Total</TableHead>
+                    <TableHead className="font-semibold">Descripción</TableHead>
+                    <TableHead className="font-semibold text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered?.map((h) => (
-                    <TableRow key={h.id}>
-                      <TableCell className="font-mono font-medium">{h.codigo}</TableCell>
+                  {filtered?.map((h: Record<string, unknown>) => (
+                    <TableRow key={h.id as string}>
+                      <TableCell className="font-mono font-medium">{h.codigo as string}</TableCell>
                       <TableCell>
                         <div>
-                          <p className="font-medium">{h.nombre}</p>
-                          {h.marca && (
-                            <p className="text-xs text-muted-foreground">{h.marca}</p>
+                          <p className="font-medium">{h.nombre as string}</p>
+                          {(h.marca as string) && (
+                            <p className="text-xs text-muted-foreground">{h.marca as string}</p>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="w-[100px]">{h.categoria?.nombre || '-'}</TableCell>
-                      <TableCell className="w-[60px]">{h.unidad}</TableCell>
-                      <TableCell className="text-right w-[80px]">
-                        {h.stockMinimo ?? '-'}
-                      </TableCell>
-                      <TableCell className="text-right w-[80px]">
-                        <Badge variant={h.stockTotal > 0 ? 'default' : 'destructive'}>
-                          {h.stockTotal}
-                        </Badge>
-                      </TableCell>
-                      {sedes.map((sede) => (
-                        <TableCell key={sede} className="text-right w-[70px]">
-                          {(h.stockPorSede?.[sede] || 0) > 0 ? (
-                            <span className="font-medium">{h.stockPorSede?.[sede] || 0}</span>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
+                      <TableCell className="w-28">{(h.categoria as Record<string, unknown>)?.nombre || '-'}</TableCell>
+                      <TableCell>{h.unidad as string}</TableCell>
+                      <TableCell className="text-right">{h.stockMinimo || '-'}</TableCell>
+                      {sedes?.map((sede: { id: string; nombre: string }) => (
+                        <TableCell key={sede.id} className="text-right">
+                          {getStockPorSede(h, sede.id)}
                         </TableCell>
                       ))}
-                      <TableCell className="max-w-[200px] truncate" title={h.descripcion || ''}>
-                        {h.descripcion || '-'}
+                      <TableCell className="text-right">
+                        <Badge variant={((h.stockTotal as number) || 0) > 0 ? 'default' : 'destructive'}>
+                          {h.stockTotal as number}
+                        </Badge>
                       </TableCell>
-                      <TableCell className="text-right w-[80px]">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(h as Record<string, unknown>)}>
+                      <TableCell className="max-w-32 truncate text-sm text-muted-foreground">
+                        {(h.descripcion as string) || '-'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(h)}>
                           <Pencil className="w-4 h-4" />
                         </Button>
                       </TableCell>
@@ -372,7 +422,7 @@ export function HerramientasPage() {
                   ))}
                   {filtered?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8 + sedes.length} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={9 + (sedes?.length || 0)} className="text-center py-8 text-muted-foreground">
                         <Wrench className="w-12 h-12 mx-auto mb-2 opacity-50" />
                         No se encontraron herramientas
                       </TableCell>
@@ -394,46 +444,32 @@ export function HerramientasPage() {
             </DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Código solo se muestra al editar (autogenerado al crear) */}
             {editingItem && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Código</Label>
-                  <Input
-                    value={editingItem.codigo as string}
-                    disabled
-                    className="bg-slate-100"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Nombre *</Label>
-                  <Input
-                    value={formData.nombre}
-                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-            )}
-            
-            {!editingItem && (
               <div className="space-y-2">
-                <Label>Nombre *</Label>
+                <Label>Código</Label>
                 <Input
-                  value={formData.nombre}
-                  onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                  required
-                  placeholder="Ingrese el nombre de la herramienta"
+                  value={editingItem.codigo as string}
+                  disabled
+                  className="bg-muted"
                 />
-                <p className="text-xs text-muted-foreground">El código se generará automáticamente</p>
               </div>
             )}
+
+            <div className="space-y-2">
+              <Label>Nombre *</Label>
+              <Input
+                value={formData.nombre}
+                onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                required
+              />
+            </div>
 
             <div className="space-y-2">
               <Label>Descripción</Label>
               <Textarea
                 value={formData.descripcion}
                 onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                placeholder="Descripción de la herramienta"
               />
             </div>
 
